@@ -238,6 +238,12 @@ var odinFormBuilder = {
      * if the user is an ODIN Lite user then this will set them up.
      */
     isODINLiteUser: function(){
+        //check to see if no redirect.
+        var noRedirect = via.getParamsValue("noredirect");
+        if(!via.undef(noRedirect) && noRedirect.toLowerCase() === "true"){
+            return false;
+        }
+
         if(via.undef(odinFormBuilder.odinLite_entityDir,true) || via.undef(odinFormBuilder.odinLite_entityName,true)){
             return false;
         }
@@ -249,6 +255,13 @@ var odinFormBuilder = {
      * this redirects to odinLite if the dbdir and dnname are not present.
      */
     checkODINLiteRedirect: function(isODINLiteUser){
+        //check to see if no redirect.
+        var noRedirect = via.getParamsValue("noredirect");
+        if(!via.undef(noRedirect) && noRedirect.toLowerCase() === "true"){
+                return;
+        }
+
+        //Check if it is an Odin Lite user
         if(!via.undef(isODINLiteUser,true) && isODINLiteUser === true){
 
             if(!odinFormBuilder.isODINLiteUser()){
@@ -872,8 +885,13 @@ var odinFormBuilder = {
                 }else{
                     via.debug("Job Form Successful:", data);
 
+                    //For dynamic dates
+                    odinFormBuilder.dynamicDateComboData = data.data.dynamicDateComboData;
+                    odinFormBuilder.dynamicDateExampleDate = data.data.dynamicDateExampleDate;
+
                     //Make sure the terminate button should be shown.
                     odinFormBuilder.isUseInternalJVMEnabled = data.data.isUseInternalJVMEnabled;
+                    odinFormBuilder.reportOutputType = data.data.reportOutputType;
 
                     //Check odin lite variables.
                     odinFormBuilder.checkODINLiteRedirect(data.data.isODINLiteUser);
@@ -1110,7 +1128,15 @@ var odinFormBuilder = {
             $('#saveSettingsButton').click(function(){
                 var saveJson = odinFormBuilder.getSaveSettingsObject(variables);
                 saveJson = JSON.stringify(saveJson);
-                via.saveWindow(odin.PROCESS_MANAGER_APP_ID,saveId,saveJson,function(loadJson){});
+                /*
+                if(!odinFormBuilder.isODINLiteUser()){
+                    via.saveWindow(odin.PROCESS_MANAGER_APP_ID,saveId,saveJson,function(loadJson){},true,odinFormBuilder.reportOutputType);
+                }else{
+                    via.saveWindow(odin.PROCESS_MANAGER_APP_ID,saveId,saveJson,function(loadJson){},true);
+                }
+                */
+                via.saveWindow(odin.PROCESS_MANAGER_APP_ID,saveId,saveJson,function(loadJson){},true);
+
             });
         }
 
@@ -1153,8 +1179,9 @@ var odinFormBuilder = {
         }).data("kendoDropDownList");
         */
         //Replaced when we did page size
-        var dropdownlist = $(".kendo-single-select")
+        var dropdownlist = $(".kendo-single-select");
         for(var i=0;i<dropdownlist.length;i++) {
+            //Make the dropdown
             $(dropdownlist[i]).kendoDropDownList({
                 filter: "contains",
                 //optionLabel: " ",
@@ -1166,7 +1193,31 @@ var odinFormBuilder = {
             });
         }
 
-        //Fix for defaulting to nothing if there is no default value. Kendo defaults to first value
+        //For dynamic dates
+        var dropdownlist = $(".kendo-dynamic-date");
+        for(var i=0;i<dropdownlist.length;i++) {
+            //Make the dropdown
+            var dd = $(dropdownlist[i]).kendoDropDownList({
+                filter: "contains",
+                //optionLabel: " ",
+                dataTextField: "text",
+                dataValueField: "value",
+                dataSource: {
+                    pageSize: odinFormBuilder.MAX_DROPDOWN_ELEMENTS
+                },
+                change: function(a,b){
+                    var name = $(a.sender.element).prop("name");
+                    var span = $("#"+name + "Example");
+                    span.empty();
+                    if(!via.undef(odinFormBuilder.dynamicDateExampleDate) && !via.undef(odinFormBuilder.dynamicDateExampleDate[a.sender.value()])){
+                        span.html("<i>"+odinFormBuilder.dynamicDateExampleDate[a.sender.value()] + "</i>");
+                    }
+                }
+            }).data('kendoDropDownList');
+            dd.trigger("change");
+        }
+
+        //Fix for defaulting to nothing if there is no default value . Kendo defaults to first value
         for(var i=0;i<variables.length;i++){
             if(via.undef(variables[i].type) || variables[i].type!==7){continue;}
             if(via.undef(variables[i].defaultValue) || variables[i].defaultValue.length === 0 || variables[i].defaultValue[0].length===0){
@@ -1247,8 +1298,8 @@ var odinFormBuilder = {
 
         $("#formBuilder_form").submit(function(e){
             e.preventDefault();
-            //set the report id
 
+            //set the report id
             var passedReportId = via.getParamsValue("reportKey");
             if(passedReportId !== null){
                 via.debug("Overriding report key:", passedReportId);
@@ -1334,6 +1385,25 @@ var odinFormBuilder = {
 
             //Gather the settings for all the types.
             switch(currVar.type){
+                case odinFormBuilder.IMAGE_FIELD:
+                    if(!via.undef(loadJson[varName],true)){
+                        //Change the radio
+                        $("input[name="+ varName + "_imageType" +"][value=" + "existing" + "]").prop('checked', true).trigger('change');
+                        //Click the image
+                        var img = $('#'+currVar.variableName+'_existingImageContainer').find("[data-image-name='" + loadJson[varName] + "']");
+                        odinFormBuilder.selectImage(img);
+                    }
+                    break;
+                    var imageType = $('input[name='+currVar.variableName+'_imageType]:checked').val();
+                    if(!via.undef(imageType) && imageType === 'existing'){
+                        var selectedImg = $('#'+currVar.variableName+'_existingImageContainer .existingImage_selected');
+                        if(!via.undef(selectedImg) && !via.undef($(selectedImg).data("image-name"))) {
+                            saveObj[currVar.variableName] = $(selectedImg).data("image-name");
+                        }
+                    }else{
+                        saveObj[currVar.variableName] = "";
+                    }
+                    break;
                 case odinFormBuilder.DATE_ITERATOR_FIELD:
                     //Start Date
                     if(!via.undef(loadJson[varName + "_S"],true)){
@@ -1351,10 +1421,17 @@ var odinFormBuilder = {
                     break;
                 case odinFormBuilder.DATE_FIELD:
                     if(!via.undef(loadJson[varName],true)){//Check for the saved variable
-                        if(via.undef($( "input[name='"+currVar.variableName+"']")) || $( "input[name='"+currVar.variableName+"']").length === 0){continue;}
-                        var dte = kendo.parseDate(loadJson[varName], odin.DEFAULT_DATE_SAVE_FORMAT);
-                        $( "input[name='"+currVar.variableName+"']").data("kendoDatePicker").value(dte);
+                        if(!via.undef(loadJson[varName + "_dateType"]) && loadJson[varName + "_dateType"] === 'dynamic'){
+                            var singleSelect = $('#' + varName + "_dynamicField").data("kendoDropDownList");
+                            singleSelect.value(loadJson[varName]);
+                            singleSelect.trigger("change");
+                        }else{
+                            if(via.undef($( "input[name='"+currVar.variableName+"']")) || $( "input[name='"+currVar.variableName+"']").length === 0){continue;}
+                            var dte = kendo.parseDate(loadJson[varName], odin.DEFAULT_DATE_SAVE_FORMAT);
+                            $( "input[name='"+currVar.variableName+"']").data("kendoDatePicker").value(dte);
+                        }
                     }
+                    $("input[name="+ varName + "_dateType" +"][value=" + loadJson[varName + "_dateType"] + "]").prop('checked', true).trigger('change');
                     break;
                 case odinFormBuilder.INTEGER_FIELD:
                 case odinFormBuilder.DOUBLE_FIELD:
@@ -1382,10 +1459,25 @@ var odinFormBuilder = {
                         $( "#"+currVar.variableName+"_textArea").val(loadJson[varName]);
                     }
                     break;
+                case odinFormBuilder.COLOR_CHOOSER_FIELD:
+                    if(!via.undef(loadJson[varName],true)) {//Check for the saved variable
+                        if (via.undef($("#" + currVar.variableName)) || $("#" + currVar.variableName).length === 0) {
+                            continue;
+                        }
+                        var picker = $("#" + currVar.variableName).data('kendoColorPicker');
+                        if(!via.undef($("#" + currVar.variableName))){
+                            picker.value(loadJson[varName]);
+                        }
+                    }
+                    break;
                 default:
                     if(!via.undef(loadJson[varName],true)){//Check for the saved variable
-                        if(via.undef($( "input[name='"+currVar.variableName+"']")) || $( "input[name='"+currVar.variableName+"']").length === 0){continue;}
-                        $( "input[name='"+currVar.variableName+"']").val(loadJson[varName]);
+                        try {
+                            if (via.undef($("input[name='" + currVar.variableName + "']")) || $("input[name='" + currVar.variableName + "']").length === 0) {
+                                continue;
+                            }
+                            $("input[name='" + currVar.variableName + "']").val(loadJson[varName]);
+                        }catch(err){}
                     }
             }
         }
@@ -1405,6 +1497,17 @@ var odinFormBuilder = {
 
             //Gather the settings for all the types.
             switch(currVar.type){
+                case odinFormBuilder.IMAGE_FIELD:
+                    var imageType = $('input[name='+currVar.variableName+'_imageType]:checked').val();
+                    if(!via.undef(imageType) && imageType === 'existing'){
+                        var selectedImg = $('#'+currVar.variableName+'_existingImageContainer .existingImage_selected');
+                        if(!via.undef(selectedImg) && !via.undef($(selectedImg).data("image-name"))) {
+                            saveObj[currVar.variableName] = $(selectedImg).data("image-name");
+                        }
+                    }else{
+                        saveObj[currVar.variableName] = "";
+                    }
+                    break;
                 case odinFormBuilder.DATE_ITERATOR_FIELD:
                     //Start Date
                     if(via.undef($( "input[name='"+currVar.variableName+"_S']")) || $( "input[name='"+currVar.variableName+"_S']").length === 0){continue;}
@@ -1417,9 +1520,20 @@ var odinFormBuilder = {
                     saveObj[currVar.variableName + "_E"] = kendo.toString(endDateBoxValue, odin.DEFAULT_DATE_SAVE_FORMAT);
                     break;
                 case odinFormBuilder.DATE_FIELD:
-                    if(via.undef($( "input[name='"+currVar.variableName+"']")) || $( "input[name='"+currVar.variableName+"']").length === 0){continue;}
-                    var dateBoxValue = $( "input[name='"+currVar.variableName+"']").data("kendoDatePicker").value();
-                    saveObj[currVar.variableName] = kendo.toString(dateBoxValue, odin.DEFAULT_DATE_SAVE_FORMAT);
+                    var dateType = $('input[name='+currVar.variableName+'_dateType]:checked').val();
+                    if(!via.undef(dateType) && dateType === 'dynamic'){
+                        if(via.undef($('#' + currVar.variableName + "_dynamicField") || $('#' + currVar.variableName + "_dynamicField").length === 0)){continue;}
+                        saveObj[currVar.variableName + "_dateType"] = "dynamic";
+                        var singleSelect = $('#' + currVar.variableName + "_dynamicField").data("kendoDropDownList");
+                        saveObj[currVar.variableName] = singleSelect.value();
+                    }else {
+                        saveObj[currVar.variableName + "_dateType"] = "date";
+                        if (via.undef($("input[name='" + currVar.variableName + "']")) || $("input[name='" + currVar.variableName + "']").length === 0) {
+                            continue;
+                        }
+                        var dateBoxValue = $("input[name='" + currVar.variableName + "']").data("kendoDatePicker").value();
+                        saveObj[currVar.variableName] = kendo.toString(dateBoxValue, odin.DEFAULT_DATE_SAVE_FORMAT);
+                    }
                     break;
                 case odinFormBuilder.DROP_DOWN_FIELD:
                 case odinFormBuilder.TREE_DROP_DOWN_FIELD:
@@ -1443,7 +1557,6 @@ var odinFormBuilder = {
                     saveObj[currVar.variableName] = $( "input[name='"+currVar.variableName+"']" ).val();
             }
         }
-
         return saveObj;
     },
 
@@ -1552,7 +1665,7 @@ var odinFormBuilder = {
                         startDefaultValue = $.format.date(startDate, 'yyyy-MM-dd');
                     }
                     if(variable.defaultValue.length > 1 && !via.undef(variable.defaultValue[1])){
-                        var endDate = $.format.date(variable.defaultValue[0], 'yyyyMMdd');
+                        var endDate = $.format.date(variable.defaultValue[1], 'yyyyMMdd');
                         endDefaultValue = $.format.date(endDate, 'yyyy-MM-dd');
                     }
                 }
@@ -1577,10 +1690,7 @@ var odinFormBuilder = {
                     '<input style="width:100%;" type="text" class="k-textbox" name="'+variable.variableName+'" placeholder="" value="'+defaultValue+'">' +
                     '</div>' +
                     '</div>';
-
-
                 break;
-
             case odinFormBuilder.INTEGER_FIELD:
                 fieldHtml += '<div class="form-group row">' +
                     '<div class="col-md-12">' +
@@ -1601,7 +1711,6 @@ var odinFormBuilder = {
                     '</div>' +
                     '</div>';
                 break;
-
             case odinFormBuilder.PASSWORD_FIELD:
                 fieldHtml += '<div class="form-group">' +
                     '<div class="col-md-12">' +
@@ -1613,19 +1722,63 @@ var odinFormBuilder = {
                     '</div>';
                 break;
             case odinFormBuilder.DATE_FIELD:
-                /*fieldHtml += '<div class="form-group">' +
-                    '<label for="'+variable.variableName+'">'+variable.label+'</label>' +
-                    '<input type="date" class="form-control" name="'+variable.variableName+'" placeholder="" value="'+defaultValue+'">' +
-                    '</div>';*/
                 if(defaultValue === null){
                     defaultValue = "";
                 }
+                //Commented on 11/14/2018 by Rocco - implemented dynamic dates
+                /*
                 fieldHtml += '<div class="form-group row">' +
                     '<div class="col-md-12">' +
                     '<label for="'+variable.variableName+'">'+variable.label+
                     ((variable.hasHelpLink === true)? ' <img src="../images/help.png" style="cursor:pointer;" onClick="odinFormBuilder.displayHelpLink(\''+variable.variableName+'\',\''+variable.label+'\');">' : '') + //Check for help Link
                     '</label>' +
                     '<input type="date" style="width:100%;" class="kendo-date" name="'+variable.variableName+'" placeholder="" value="'+defaultValue+'">' +
+                    '</div>' +
+                    '</div>';
+                */
+
+                //Dynamic Date Implementation, on 20181114 by Rocco
+                fieldHtml += '<div class="form-group row">' +
+                    '<div class="col-md-12">' +
+                    '<label>' + variable.label +
+                    ((variable.hasHelpLink === true) ? ' <img src="../images/help.png" style="cursor:pointer;" onClick="odinFormBuilder.displayHelpLink(\'' + variable.variableName + '\',\'' + variable.label + '\');">' : '') + //Check for help Link
+                    '</label>' +
+                    '<br/>' +
+                    //Radio buttons
+                    '<input type="radio" value="date" name="'+variable.variableName+'_dateType" id="'+variable.variableName+'_dateRadio" class="k-radio" checked="checked" onchange="$(\'#'+variable.variableName+'_dynamicDateContainer\').hide();$(\'#'+variable.variableName+'_realDateContainer\').show();$(\'img[data-variable-name='+variable.variableName+']\').removeClass(\'existingImage_selected\');">' +
+                    '<label class="k-radio-label" for="'+variable.variableName+'_dateRadio">Date Selection</label>' +
+                    '<input type="radio" value="dynamic" name="'+variable.variableName+'_dateType" id="'+variable.variableName+'_dynamicRadio" class="k-radio" style="margin-left:20px;" onchange="$(\'#'+variable.variableName+'_dynamicDateContainer\').show();$(\'#'+variable.variableName+'_realDateContainer\').hide();delete odinFormBuilder.selectedImages[\''+variable.variableName+'\'];">' +
+                    '<label class="k-radio-label" for="'+variable.variableName+'_dynamicRadio">Defined Period Selection</label>';
+                    //This is for a date chooser
+                fieldHtml += '<span id="' + variable.variableName + '_realDateContainer">' +
+                    '<input type="date" style="width:100%;" class="kendo-date" name="'+variable.variableName+'" placeholder="" value="'+defaultValue+'">' +
+                    '</span>' +
+
+                    '<br/>';
+                //This is for a dynamic date.
+                fieldHtml += '<div style="display:none;" id="' + variable.variableName + '_dynamicDateContainer">' +
+                    '<select id="'+variable.variableName+'_dynamicField" style="width:100%;" name="'+variable.variableName+'_dynamic" class="kendo-dynamic-date form-control">';
+
+                //Populate the different types.
+                if(!via.undef(odinFormBuilder.dynamicDateComboData,true)) {//Check for empty values
+                    for (var i = 0; i < odinFormBuilder.dynamicDateComboData.length; i++) {//Loop through elements
+                        var text = odinFormBuilder.dynamicDateComboData[i].text;
+                        var value = odinFormBuilder.dynamicDateComboData[i].value;
+                        if (via.undef(text, true) || via.undef(value, true)) {
+                            continue;
+                        }
+                        var selected = '';
+                        if (!via.undef(variable.defaultValue) && variable.defaultValue.indexOf(value) !== -1) {
+                            selected = 'selected';
+                        }
+                        fieldHtml += '<option ' + selected + ' value="' + value + '">' + text + '</option>';
+                    }
+                }
+                fieldHtml += '</select>' +
+                    '<br><span style="color:red;margin-left:10px;" id="' + variable.variableName + '_dynamicExample">' +
+                    '</span>';
+
+                fieldHtml += '</div>' +
                     '</div>' +
                     '</div>';
                 break;
@@ -1649,7 +1802,7 @@ var odinFormBuilder = {
                     '<label for="'+variable.variableName+'">'+variable.label+
                     ((variable.hasHelpLink === true)? ' <img src="../images/help.png" style="cursor:pointer;" onClick="odinFormBuilder.displayHelpLink(\''+variable.variableName+'\',\''+variable.label+'\');">' : '') + //Check for help Link
                     '</label>' +
-                    '<select  id="'+variable.variableName+'_inputField" style="width:100%;" name="'+variable.variableName+'" class="kendo-single-select form-control">';
+                    '<select id="'+variable.variableName+'_inputField" style="width:100%;" name="'+variable.variableName+'" class="kendo-single-select form-control">';
 
 
                 if(!via.undef(variable.valueList,true)) {//Check for empty values
@@ -1682,7 +1835,9 @@ var odinFormBuilder = {
                     fieldHtml += '<select id="'+variable.variableName+'_inputField" style="width:100%;" multiple class="kendo-select" name="'+variable.variableName+'">';
                 }else{
                     fieldHtml += '<select id="'+variable.variableName+'_inputField" style="width:100%;" class="kendo-single-select" name="'+variable.variableName+'">';
-                    fieldHtml += '<option value=""> </option>';
+                    if(via.undef(variable.appendNullItem) || variable.appendNullItem === true) {
+                        fieldHtml += '<option value=""> </option>';
+                    }
                 }
 
                 if(!via.undef(variable.valueList,true)) {//Check for empty values
@@ -1693,7 +1848,7 @@ var odinFormBuilder = {
                             continue;
                         }
                         var selected = '';
-                        if (!via.undef(variable.defaultValue) && variable.defaultValue.indexOf(value) !== -1) {
+                        if (!via.undef(variable.defaultValue,true)  && variable.defaultValue.length > 0 && variable.defaultValue[0].indexOf(value) !== -1) {
                             selected = 'selected';
                         }
                         fieldHtml += '<option ' + selected + ' value="' + value + '">' + localValue + '</option>';
@@ -1727,16 +1882,16 @@ var odinFormBuilder = {
                 break;
             case odinFormBuilder.IMAGE_FIELD:
                 //This has saved images. Show the thumbnails as well.
-                if(!via.undef(variable.savedImages)){
+                if(!via.undef(variable.savedImages) && !$.isEmptyObject(variable.savedImages)){
                     fieldHtml += '<div class="form-group row">' +
                         '<div class="col-md-12">' +
                         '<label>' + variable.label +
                         ((variable.hasHelpLink === true) ? ' <img src="../images/help.png" style="cursor:pointer;" onClick="odinFormBuilder.displayHelpLink(\'' + variable.variableName + '\',\'' + variable.label + '\');">' : '') + //Check for help Link
                         '</label>' +
                         '<br/>' +
-                        '<input type="radio" name="imageType" id="'+variable.variableName+'_existingRadio" class="k-radio" checked="checked" onchange="$(\'#'+variable.variableName+'_newImageContainer\').hide();$(\'#'+variable.variableName+'_existingImageContainer\').show();$(\'img[data-variable-name='+variable.variableName+']\').removeClass(\'existingImage_selected\');">' +
+                        '<input type="radio" value="existing" name="'+variable.variableName+'_imageType" id="'+variable.variableName+'_existingRadio" class="k-radio" checked="checked" onchange="$(\'#'+variable.variableName+'_newImageContainer\').hide();$(\'#'+variable.variableName+'_existingImageContainer\').show();$(\'img[data-variable-name='+variable.variableName+']\').removeClass(\'existingImage_selected\');">' +
                         '<label class="k-radio-label" for="'+variable.variableName+'_existingRadio">Existing Image</label>' +
-                        '<input type="radio" name="imageType" id="'+variable.variableName+'_newRadio" class="k-radio" style="margin-left:20px;" onchange="$(\'#'+variable.variableName+'_newImageContainer\').show();$(\'#'+variable.variableName+'_existingImageContainer\').hide();delete odinFormBuilder.selectedImages[\''+variable.variableName+'\'];">' +
+                        '<input type="radio" value="new" name="'+variable.variableName+'_imageType" id="'+variable.variableName+'_newRadio" class="k-radio" style="margin-left:20px;" onchange="$(\'#'+variable.variableName+'_newImageContainer\').show();$(\'#'+variable.variableName+'_existingImageContainer\').hide();delete odinFormBuilder.selectedImages[\''+variable.variableName+'\'];">' +
                         '<label class="k-radio-label" for="'+variable.variableName+'_newRadio">New Image</label>' +
                         //This is for a new image.
                         '<span id="' + variable.variableName + '_newImageContainer" style="display:none;"><input style="width:100%;" type="file" class="kendo-image-file" name="' + variable.variableName + '" id="' + variable.variableName + '"></span>' +
