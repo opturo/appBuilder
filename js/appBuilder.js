@@ -40,6 +40,7 @@ var odinFormBuilder = {
     processTreeData: null,//Holds the data for the report data (process tree)
     currentData: null,//Holds the current data for the process
     selectedImages: {},//Holds the image name of the previously selected image
+    groupedVariables: {},//Holds the grouping grids if there are any.
 
     //For ODIN Lite
     odinLite_entityDir: null,
@@ -144,6 +145,7 @@ var odinFormBuilder = {
 
         //Assign an action to the back button
         $('#formBuilder_backButton').click(function(){
+            $('#smallLoadingMessage').hide();
             $('#resultsPanel').hide();
             $('#mainPanel').fadeIn();
             $('#formBuilder_resultButtons').hide();
@@ -306,6 +308,11 @@ var odinFormBuilder = {
      * launches the report dialog
      */
     getChangeReportDialog: function(){
+        //Dont launch more than once.
+        if($('#changeReportDialog').length){
+            return;
+        }
+
         //Get the data if they
         if(via.undef(odinFormBuilder.processTreeData)){
             odinFormBuilder.getProcessTreeFromServer(makeReportWindow);
@@ -357,6 +364,9 @@ var odinFormBuilder = {
                 height: "600px",
                 title: "Select a Report",
                 visible: false,
+                close: function(){
+                    $('#changeReportDialog').remove();
+                },
                 actions: [
                     {
                         text: 'Cancel',
@@ -462,6 +472,8 @@ var odinFormBuilder = {
         $('#accountButton_back').hide();
         $('#accountButton').show();
 
+        //Saved report - clear
+        $('.savedReportName').empty();
 
         var params = via.getQueryParams();
         params.jobname = jobKey;
@@ -737,6 +749,11 @@ var odinFormBuilder = {
                 overrideUser: odinFormBuilder.odinLite_overrideUser
             }),
             function(data){
+                if(!via.undef(data,true) && data.success === false){
+                    via.debug("Get Process Tree Failure:", data.message);
+                    odin.alert("Get Process Tree Error",data.message);
+                    return;
+                }
                 odinFormBuilder.processTreeData = data;
 
                 //Redirect to odin lite if dbdir is missing
@@ -893,6 +910,12 @@ var odinFormBuilder = {
                     odinFormBuilder.isUseInternalJVMEnabled = data.data.isUseInternalJVMEnabled;
                     odinFormBuilder.reportOutputType = data.data.reportOutputType;
 
+                    //Keep track of the variables.
+                    odinFormBuilder.DYNAMIC_SETTING_LIST = data.data.DYNAMIC_SETTING_LIST;
+
+                    //Max File Size
+                    odinFormBuilder.MAX_FILE_SIZE = data.data.MAX_FILE_SIZE;
+
                     //Check odin lite variables.
                     odinFormBuilder.checkODINLiteRedirect(data.data.isODINLiteUser);
 
@@ -1009,6 +1032,19 @@ var odinFormBuilder = {
      * @param sets - The sets of data to build html for
      */
     getFormHtml: function(variables,sets,saveId){
+
+        //Loop through variables to see if there are groups.
+        odinFormBuilder.groupedVariables = {};
+        variables.forEach(function(e){
+            if(!via.undef(e.groupName,true)){
+                var groupName = e.groupName;
+                if(via.undef(odinFormBuilder.groupedVariables[groupName])){
+                    odinFormBuilder.groupedVariables[groupName] = [];
+                }
+                odinFormBuilder.groupedVariables[groupName].push(e);
+            }
+        });
+
         var html = "";
         for(var s=0;s<sets.length;s++){
             var setHtml = "";
@@ -1092,7 +1128,7 @@ var odinFormBuilder = {
             html = formHtml + html;
 
             //Saving and Loading Buttons.
-            if(!via.undef(saveId) && saveId !== -1) {
+            if(!via.undef(saveId) && saveId !== -1 && (odin.USER_INFO.isAdminUser===true || !odinFormBuilder.jobName.startsWith("DEMO_"))) {
                 html +=
                     //Load
                     '<button type="button" id="loadSettingsButton" style="margin:10px 10px 10px 0;" title="Load Settings" class="tr btn btn-primary">' +
@@ -1135,7 +1171,9 @@ var odinFormBuilder = {
                     via.saveWindow(odin.PROCESS_MANAGER_APP_ID,saveId,saveJson,function(loadJson){},true);
                 }
                 */
-                via.saveWindow(odin.PROCESS_MANAGER_APP_ID,saveId,saveJson,function(loadJson){},true);
+                via.saveWindow(odin.PROCESS_MANAGER_APP_ID,saveId,saveJson,function(reportName){
+                    $('.savedReportName').html("Report Setting: " + reportName);
+                },true);
 
             });
         }
@@ -1265,6 +1303,19 @@ var odinFormBuilder = {
             multiple: false,
             localization: {
                 select: "Select a file..."
+            },
+            validation: {
+                maxFileSize: odinFormBuilder.MAX_FILE_SIZE
+            }
+        });
+
+        $(".kendo-multiple-file").kendoUpload({
+            multiple: true,
+            localization: {
+                select: "Select files..."
+            },
+            validation: {
+                maxFileSize: odinFormBuilder.MAX_FILE_SIZE
             }
         });
 
@@ -1276,6 +1327,7 @@ var odinFormBuilder = {
             },
             validation: {
                 allowedExtensions: [".jpg",".png",".gif"],
+                maxFileSize: odinFormBuilder.MAX_FILE_SIZE
             }
         });
 
@@ -1295,6 +1347,71 @@ var odinFormBuilder = {
             format: "#,##0.00######",
             decimals: 8
         });
+
+        //Make the grouping grids.
+        $.each(odinFormBuilder.groupedVariables,function(grp){
+            var variables = odinFormBuilder.groupedVariables[grp];
+
+            var height = $("#"+via.cleanId(grp)+"_groupButton").closest('.panel-info').height();
+            $("#groupGrid_"+via.cleanId(grp)).kendoGrid({
+                height:(height-80),
+                selectable: true
+            });
+
+            //Event for the delete button
+            $("#"+via.cleanId(grp)+"_groupDeleteButton").click(function() {
+                var gridAdditive = $("#groupGrid_" + via.cleanId(grp)).data('kendoGrid');
+
+                var selectedItem = gridAdditive.dataItem(gridAdditive.select());
+                gridAdditive.dataSource.remove(selectedItem);
+            });
+
+            //Event for the grouping button
+            $("#"+via.cleanId(grp)+"_groupButton").click(function(){
+                //Get the form data
+                var formData = new FormData($('#formBuilder_form')[0]);
+                var jsonObject = {};
+                formData.forEach(function(value, key){
+                    if(!via.undef(jsonObject[key])){
+                        jsonObject[key] =  jsonObject[key] + ";" + value;
+                    }else {
+                        jsonObject[key] = value;
+                    }
+                });
+
+                var isError = false;
+                var rec = {};
+                $.each(variables,function(idx) {
+                    var variable = variables[idx];
+                    var value = jsonObject[variable.variableName];
+                    switch(variable.type){
+                        case odinFormBuilder.DATE_FIELD:
+                            var dateType = jsonObject[variable.variableName + "_dateType"];
+                            if(dateType === "dynamic"){
+                                rec[variable.variableName] = jsonObject[variable.variableName + "_dynamic"];
+                            }else{
+                                rec[variable.variableName] = kendo.toString(kendo.parseDate(value+"","dd-MMM-yyyy"),"yyyyMMdd");
+                                //rec[variable.variableName] = value;
+                            }
+                            break;
+                        default:
+                            rec[variable.variableName] = value;
+                    }
+                    if (variable.isRequired === true && via.undef(rec[variable.variableName], true)) {
+                        isError = true;
+                        via.kendoAlert("Error","'"+variable.label+"' is a required value.");
+                    }
+                });
+
+                if(isError !== true) {
+                    var grid = $("#groupGrid_" + via.cleanId(grp)).data('kendoGrid');
+                    grid.dataSource.add(rec);
+                    //$('#formBuilder_form')[0].reset();
+                }
+
+            });
+        });
+
 
         $("#formBuilder_form").submit(function(e){
             e.preventDefault();
@@ -1378,6 +1495,19 @@ var odinFormBuilder = {
      * This method will set the saved settings into the report.
      */
     loadReportSettings: function(loadJson, variables){
+        //console.log('loadJson',loadJson);
+
+        //Load the groups.
+        $.each(odinFormBuilder.groupedVariables,function(grp){
+
+            if(!via.undef(loadJson[via.cleanId(grp) + "_grid"])){
+                var grid = $("#groupGrid_" + via.cleanId(grp)).data('kendoGrid');
+                grid.dataSource.data([]);
+                grid.dataSource.data(JSON.parse(loadJson[via.cleanId(grp) + "_grid"]));
+            }
+        });
+
+        //Load the variables
         for(var i=0;i<variables.length;i++){
             var currVar = variables[i];
             if(via.undef(currVar) || via.undef(currVar.variableName)){ continue; }
@@ -1491,9 +1621,23 @@ var odinFormBuilder = {
     getSaveSettingsObject: function(variables){
         var saveObj = {};
 
+        //Loop the grouping.
+        var groupedVariables = [];
+        $.each(odinFormBuilder.groupedVariables,function(grp){
+            var grid = $("#groupGrid_" + via.cleanId(grp)).data('kendoGrid');
+            saveObj[via.cleanId(grp) + "_grid"] = JSON.stringify(grid.dataSource.data().toJSON());
+
+            var variables = odinFormBuilder.groupedVariables[grp];
+            for(var i in variables){
+                groupedVariables.push(variables[i].variableName);
+            }
+        });
+
+        //Get the variables
         for(var i=0;i<variables.length;i++){
             var currVar = variables[i];
             if(via.undef(currVar) || via.undef(currVar.variableName)){ continue; }
+            if($.inArray(currVar.variableName,groupedVariables) !== -1){ continue; }//Dont save grouped variables
 
             //Gather the settings for all the types.
             switch(currVar.type){
@@ -1557,6 +1701,8 @@ var odinFormBuilder = {
                     saveObj[currVar.variableName] = $( "input[name='"+currVar.variableName+"']" ).val();
             }
         }
+
+        //console.log('saveObj',saveObj);
         return saveObj;
     },
 
@@ -1592,6 +1738,7 @@ var odinFormBuilder = {
         });
         //End - Create the groupings for the FieldSets
 
+        var groups = [];
         for(var i=0;i<fsSet.length;i++){
             if(i===0) {
                 html += '<div class="well">';
@@ -1601,33 +1748,49 @@ var odinFormBuilder = {
             //Has NO FieldSet
             if(obj.name === null){
                 for(var j=0;j<fsSet[i].set.length;j++) {
-                    html += odinFormBuilder.getFieldTypeHtml(variables[fsSet[i].set[j]]);
+                    var variable = variables[fsSet[i].set[j]];
+                    if(via.undef(variable.groupName,true)) {
+                        html += odinFormBuilder.getFieldTypeHtml(variable);
+                    }else if($.inArray(variable.groupName,groups)===-1){
+                        groups.push(variable.groupName);
+                    }
+                }
+                //Do the groups now.
+                if(i===(fsSet.length-1)) {
+                    html += odinFormBuilder.getGroupHtml(groups);
                 }
             }
             //Has a FieldSet
             else{
-
                 for(var j=0;j<fsSet[i].set.length;j++) {
                     if(j===0){
                         /* Well
-                        html += '<div class="well">' +
-                                '<h3>' + fsSet[i].name + '</h3>' +
-                                '<hr/>';
-                        */
+                         html += '<div class="well">' +
+                         '<h3>' + fsSet[i].name + '</h3>' +
+                         '<hr/>';
+                         */
                         html += '<div class="panel panel-'+odinFormBuilder.STYLE+'">' +
                             '<div class="panel-heading">' +
                             '<h3 class="panel-title">'+fsSet[i].name+'</h3>' +
                             '</div>' +
                             '<div class="panel-body">';
                     }
-                    html += odinFormBuilder.getFieldTypeHtml(variables[fsSet[i].set[j]]);
+
+                    var variable = variables[fsSet[i].set[j]];
+                    if(via.undef(variable.groupName,true)) {
+                        html += odinFormBuilder.getFieldTypeHtml(variable);
+                    }else if($.inArray(variable.groupName,groups)===-1){
+                        groups.push(variable.groupName);
+                    }
 
                     if(j===(fsSet[i].set.length-1)){
+                        html += odinFormBuilder.getGroupHtml(groups);
+
                         html += '</div>' +
-                                '</div>';
+                            '</div>';
                         /* Well
-                        html += '</div>';
-                        */
+                         html += '</div>';
+                         */
                     }
                 }
             }
@@ -1636,6 +1799,121 @@ var odinFormBuilder = {
             if(i===(fsSet.length-1)) {
                 html += '</div>';
             }
+        }
+
+        return html;
+    },
+
+    addGroupVariablesToFormData: function(formData){
+
+        //Loop through the variables and delete.
+        $.each(odinFormBuilder.groupedVariables,function(group,o){
+            for(var i in o){
+                var variable = o[i];
+                formData.delete(variable.variableName);
+                if(variable.type === odinFormBuilder.DATE_FIELD){
+                    formData.delete(variable.variableName + "_dateType");
+                    formData.delete(variable.variableName + "_dynamic");
+                }
+            }
+        });
+
+        //Loop through the grids and add their values.
+        var variableList = {};
+        $.each(odinFormBuilder.groupedVariables,function(grp,o) {
+            var grid = $("#groupGrid_" + via.cleanId(grp)).data('kendoGrid');
+            var jsonArr= grid.dataSource.data().toJSON();
+            for(var v in o){
+                var variable = o[v];
+                var variableName = variable.variableName;
+                var variableString = "";
+                for(var r=0;r<jsonArr.length;r++){
+                    var row = jsonArr[r];
+                    //Add the value
+                    if(!via.undef(row[variableName])){
+                        variableString += row[variableName];
+                        if((jsonArr.length - 1) !== r) {
+                            if(!via.undef(variable.delimiter)){
+                                variableString += variable.delimiter;
+                            } else {
+                                variableString += ";";
+                            }
+                            /*
+                            if (variable.type === odinFormBuilder.CHECK_LIST_BOX_FIELD) {
+                                variableString += ";;";
+                            } else {
+                                variableString += ";";
+                            }
+                            */
+                        }
+                    }
+                }
+                variableList[variableName] = variableString;
+            }
+        });
+
+
+        //Add the variables to the form
+        $.each(variableList,function(group,varString){
+            formData.append(group,varString);
+        });
+
+
+       return formData;
+    },
+
+    getGroupHtml: function(groups){
+        if(via.undef(groups) || groups.length === 0){
+            return "";
+        }
+
+        //Loop the groups.
+        var html = "";
+        for(var i=0;i<groups.length;i++){
+            var group = groups[i];
+
+            //Make the field set
+            html += '<div style="margin-bottom:10px;" class="panel panel-'+odinFormBuilder.STYLE+'">' +
+                '<div class="panel-heading">' +
+                '<h3 class="panel-title">'+group+'</h3>' +
+                '</div>' +
+                '<div class="panel-body">';
+
+            //make the row
+            html += '<div class="row">'+
+                '<div class="col-md-5" >';
+            var groupGridName = "groupGrid_"+via.cleanId(group);
+            var tableHtml = '<table id="'+groupGridName+'" class="groupingGrid">' +
+                '<thead><tr>';
+            if(!via.undef(odinFormBuilder.groupedVariables) && !via.undef(odinFormBuilder.groupedVariables[group])){
+                var groupVariables = odinFormBuilder.groupedVariables[group];
+                for(var j=0;j<groupVariables.length;j++) {
+                    var variable = groupVariables[j];
+                    html += odinFormBuilder.getFieldTypeHtml(variable);
+                    tableHtml += '<th data-field="'+variable.variableName+'">'+variable.label+'</th>';
+                }
+            }
+            tableHtml += "</tr></thead>" +
+                "<tbody></tbody>" +
+                "</table>";
+
+            //Add the table
+            html+="</div>" +
+                '<div class="col-md-1" >' +
+                '<button type="button" id="'+via.cleanId(group)+'_groupButton" style="margin:30px 0 0 40px;" title="Add Settings" class="tr btn btn-primary">' +
+                '<span class="glyphicon glyphicon-chevron-right" aria-hidden="true"></span>' +
+                '</button>' +
+                '<button type="button" id="'+via.cleanId(group)+'_groupDeleteButton" style="clear:both;margin:20px 0 0 40px;" title="Delete Settings" class="tr btn btn-danger">' +
+                '<span class="glyphicon glyphicon-remove" aria-hidden="true"></span>' +
+                '</button>' +
+                '</div>' +
+                '<div class="col-md-6" >' +
+                tableHtml +
+                '</div>';
+
+            //End the field set
+            html += '</div>' +
+                '</div></div>';
         }
 
         return html;
@@ -1692,22 +1970,32 @@ var odinFormBuilder = {
                     '</div>';
                 break;
             case odinFormBuilder.INTEGER_FIELD:
+                var minMaxText = "";
+                if(!via.undef(variable.intRange) && variable.intRange.length === 2
+                    && variable.intRange[0] !== variable.intRange[1]){
+                    minMaxText = "min=" + variable.intRange[0] + " max=" + variable.intRange[1];
+                }
                 fieldHtml += '<div class="form-group row">' +
                     '<div class="col-md-12">' +
                     '<label for="'+variable.variableName+'">'+variable.label+
                     ((variable.hasHelpLink === true)? ' <img src="../images/help.png" style="cursor:pointer;" onClick="odinFormBuilder.displayHelpLink(\''+variable.variableName+'\',\''+variable.label+'\');">' : '') + //Check for help Link
                     '</label>' +
-                    '<input style="width:100%;" type="text" class="kendo-integer" name="'+variable.variableName+'" placeholder="" value="'+defaultValue+'">' +
+                    '<input style="width:100%;" type="text" class="kendo-integer" name="'+variable.variableName+'" placeholder="" '+minMaxText+' value="'+defaultValue+'">' +
                     '</div>' +
                     '</div>';
                 break;
             case odinFormBuilder.DOUBLE_FIELD:
+                var minMaxText = "";
+                if(!via.undef(variable.doubleRange) && variable.doubleRange.length === 2
+                    && variable.doubleRange[0] !== variable.doubleRange[1]){
+                    minMaxText = "min=" + variable.doubleRange[0] + " max=" + variable.doubleRange[1];
+                }
                 fieldHtml += '<div class="form-group row">' +
                     '<div class="col-md-12">' +
                     '<label for="'+variable.variableName+'">'+variable.label+
                     ((variable.hasHelpLink === true)? ' <img src="../images/help.png" style="cursor:pointer;" onClick="odinFormBuilder.displayHelpLink(\''+variable.variableName+'\',\''+variable.label+'\');">' : '') + //Check for help Link
                     '</label>' +
-                    '<input style="width:100%;" type="text" class="kendo-double" name="'+variable.variableName+'" placeholder="" value="'+defaultValue+'">' +
+                    '<input style="width:100%;" type="text" class="kendo-double" name="'+variable.variableName+'" placeholder="" '+minMaxText+' value="'+defaultValue+'">' +
                     '</div>' +
                     '</div>';
                 break;
@@ -1746,9 +2034,9 @@ var odinFormBuilder = {
                     '<br/>' +
                     //Radio buttons
                     '<input type="radio" value="date" name="'+variable.variableName+'_dateType" id="'+variable.variableName+'_dateRadio" class="k-radio" checked="checked" onchange="$(\'#'+variable.variableName+'_dynamicDateContainer\').hide();$(\'#'+variable.variableName+'_realDateContainer\').show();$(\'img[data-variable-name='+variable.variableName+']\').removeClass(\'existingImage_selected\');">' +
-                    '<label class="k-radio-label" for="'+variable.variableName+'_dateRadio">Date Selection</label>' +
+                    '<label class="k-radio-label" for="'+variable.variableName+'_dateRadio">Static Date Selection</label>' +
                     '<input type="radio" value="dynamic" name="'+variable.variableName+'_dateType" id="'+variable.variableName+'_dynamicRadio" class="k-radio" style="margin-left:20px;" onchange="$(\'#'+variable.variableName+'_dynamicDateContainer\').show();$(\'#'+variable.variableName+'_realDateContainer\').hide();delete odinFormBuilder.selectedImages[\''+variable.variableName+'\'];">' +
-                    '<label class="k-radio-label" for="'+variable.variableName+'_dynamicRadio">Defined Period Selection</label>';
+                    '<label class="k-radio-label" for="'+variable.variableName+'_dynamicRadio">Dynamic Date Selection</label>';
                     //This is for a date chooser
                 fieldHtml += '<span id="' + variable.variableName + '_realDateContainer">' +
                     '<input type="date" style="width:100%;" class="kendo-date" name="'+variable.variableName+'" placeholder="" value="'+defaultValue+'">' +
@@ -1785,13 +2073,22 @@ var odinFormBuilder = {
             case odinFormBuilder.FILE_ONLY_FIELD:
             case odinFormBuilder.FILE_PATH_FIELD:
             case odinFormBuilder.DIRECTORY_FIELD:
-            case odinFormBuilder.FILE_UPLOAD_FIELD:
                 fieldHtml += '<div class="form-group row">' +
                     '<div class="col-md-12">' +
                     '<label for="'+variable.variableName+'">'+variable.label+
                     ((variable.hasHelpLink === true)? ' <img src="../images/help.png" style="cursor:pointer;" onClick="odinFormBuilder.displayHelpLink(\''+variable.variableName+'\',\''+variable.label+'\');">' : '') + //Check for help Link
                     '</label>' +
                     '<input style="width:100%;" type="file" class="kendo-file" name="'+variable.variableName+'">' +
+                    '</div>' +
+                    '</div>';
+                break;
+            case odinFormBuilder.FILE_UPLOAD_FIELD:
+                fieldHtml += '<div class="form-group row">' +
+                    '<div class="col-md-12">' +
+                    '<label for="'+variable.variableName+'">'+variable.label+
+                    ((variable.hasHelpLink === true)? ' <img src="../images/help.png" style="cursor:pointer;" onClick="odinFormBuilder.displayHelpLink(\''+variable.variableName+'\',\''+variable.label+'\');">' : '') + //Check for help Link
+                    '</label>' +
+                    '<input style="width:100%;" type="file" class="kendo-multiple-file" name="'+variable.variableName+'">' +
                     '</div>' +
                     '</div>';
                 break;
@@ -1848,7 +2145,7 @@ var odinFormBuilder = {
                             continue;
                         }
                         var selected = '';
-                        if (!via.undef(variable.defaultValue,true)  && variable.defaultValue.length > 0 && variable.defaultValue[0].indexOf(value) !== -1) {
+                        if (!via.undef(variable.defaultValue,true)  && variable.defaultValue.length > 0 && $.inArray(value,variable.defaultValue)!==-1){
                             selected = 'selected';
                         }
                         fieldHtml += '<option ' + selected + ' value="' + value + '">' + localValue + '</option>';
@@ -2056,6 +2353,51 @@ var odinFormBuilder = {
         //Add the selected Images
         formData.append('selectedImages',JSON.stringify(odinFormBuilder.selectedImages));
 
+        //Add the group variables to formData
+        formData = odinFormBuilder.addGroupVariablesToFormData(formData);
+
+        //Check the required variables
+        var jsonObject = {};
+        formData.forEach(function(value, key){
+            jsonObject[key] = value;
+        });
+        if(!via.undef(odinFormBuilder.DYNAMIC_SETTING_LIST)){
+            for(var i=0;i<odinFormBuilder.DYNAMIC_SETTING_LIST.length;i++){
+                var variable = odinFormBuilder.DYNAMIC_SETTING_LIST[i];
+                if(variable.isRequired === true) {
+                    var value = null;
+                    if (variable.type === odinFormBuilder.IMAGE_FIELD) {
+                        var imageType = jsonObject[variable.variableName+"_imageType"];
+                        if(imageType === "existing"){
+                            if(!via.undef(jsonObject.selectedImages)){
+                                var selectedImages = JSON.parse(jsonObject.selectedImages);
+                                var image = selectedImages[variable.variableName]
+                                if(!via.undef(image)){
+                                    value = image;
+                                }
+                            }
+                        }else{
+                            value = jsonObject[variable.variableName];
+                        }
+                    }else if (variable.type === odinFormBuilder.DATE_FIELD) {
+                        var dateType = jsonObject[variable.variableName+"_dateType"];
+                        if(dateType === "dynamic"){
+                            value = jsonObject[variable.variableName+"_dynamic"];
+                        }else{
+                            value = jsonObject[variable.variableName];
+                        }
+                    } else {
+                        value = jsonObject[variable.variableName];
+                    }
+                    if (via.undef(value, true)) {
+                        via.kendoAlert("Missing Value", "'" + variable.label + "' is required.");
+                        return;
+                    }
+                }
+            }
+        }
+        //End - Check for required variables
+
         //Update the report id so that there are no duplicates
         $('#formBuilder_reportId').val(via.randomString());
 
@@ -2102,8 +2444,11 @@ var odinFormBuilder = {
                     }
                 }
 
+                //Reset the variables.
+                odinFormBuilder.currentDynamicStringVariables = null;
+                odinFormBuilder.currentStringIteratorSettingList = null;
 
-
+                //Check the run.
                 if(!via.undef(data,true) && data.success === false){
                     via.debug("Report Form Failure:", data.message);
                     odinFormBuilder.currentJobBreakdown = null;
@@ -2113,6 +2458,12 @@ var odinFormBuilder = {
                     $('#resultsPanel').empty();
                 }else{
                     via.debug("Report Ran Successful:", data);
+
+                    //Store the variables
+                    odinFormBuilder.currentDynamicStringVariables = data.dynamicStringVariables;
+                    odinFormBuilder.currentStringIteratorSettingList = data.stringIteratorSettingList;
+
+                    //Create output report.
                     odinFormBuilder.createOutputReport(data);
                 }
             }
@@ -2519,6 +2870,7 @@ var odinFormBuilder = {
                         if(!via.undef(data,true) && data.success === false){
                             via.debug("Get DataSet Failure:", data.message);
                             odin.alert("Get DataSet Error",data.message);
+                            $('#smallLoadingMessage').hide();
                         }else{
                             odinFormBuilder.currentData = data;
                             via.debug("Get DataSet Successful:", data, odinFormBuilder.reportId);
@@ -2575,6 +2927,7 @@ var odinFormBuilder = {
                             }
                             $('#resultsPanel').append(' <a title="Export to Excel"  id="exportButton_' + odinFormBuilder.reportId+'" class="tr btn btn-sm btn-success" href="#"><i class="fa fa-file-excel-o"></i></a>' +
                                 '<span id="saveIconContainer"></span>' +
+                                '<span id="webServiceIconContainer"></span>' +
                                 '<span id="chartIconContainer"></span>' +
                                 '<span id="treeExpandContainer"></span>' +
                                 '<br>' +
@@ -2596,8 +2949,7 @@ var odinFormBuilder = {
                                 $("#saveButton_" + odinFormBuilder.reportId).click(function(){
                                     var saveJson = odinTable.getSettingsForGrid();
                                     saveJson = JSON.stringify(saveJson);
-                                    via.saveWindow(appId,saveId,saveJson,function(loadJson){
-                                        //Callback function for save
+                                    via.saveWindow(appId,saveId,saveJson,function(reportName){
                                     });
                                 });
                             }
@@ -2613,6 +2965,14 @@ var odinFormBuilder = {
                                     if(!via.undef(data.chartData[tableLabel])) {
                                         odinCharts.init("#chartIconContainer", data.chartData[tableLabel],'../odinCharts/odinCharts.html',data.treeMap.hasOwnProperty(tableLabel));
                                     }
+                                });
+                            }
+                            //For Web Service
+                            var enableWebServices = odin.getUserSpecificSetting("enableWebServices");
+                            if(!via.undef(enableWebServices,true) && enableWebServices === "true" && !via.undef(json.hasWebServiceTemplate) && json.hasWebServiceTemplate === true) {
+                                $('#webServiceIconContainer').append('<span><a style="margin-left:10px;" title="Download Web Service Excel File"  id="webServiceButton_' + odinFormBuilder.reportId + '" class="tr btn btn-sm btn-warning pull-right" href="#"><i class="fa fa-cog"></i></a></span>');
+                                $("#webServiceButton_" + odinFormBuilder.reportId).click(function () {
+                                    odinFormBuilder.downloadWebServiceFile();
                                 });
                             }
 
@@ -2687,6 +3047,15 @@ var odinFormBuilder = {
                         '</div>');
                 }
 
+                //For Web Service
+                var enableWebServices = odin.getUserSpecificSetting("enableWebServices");
+                if(!via.undef(enableWebServices,true) && enableWebServices === "true" && !via.undef(json.hasWebServiceTemplate) && json.hasWebServiceTemplate === true) {
+                    $('#resultsPanel').append('<span><a style="margin-left:10px;" title="Download Web Service Excel File"  id="webServiceButton_' + odinFormBuilder.reportId + '" class="tr btn btn-sm btn-warning pull-right" href="#"><i class="fa fa-cog"></i></a></span>');
+                    $("#webServiceButton_" + odinFormBuilder.reportId).click(function () {
+                        odinFormBuilder.downloadWebServiceFile();
+                    });
+                }
+
                 //$('#resultsPanel').html('<a class="tr" href="javascript:window.location=\''+url+'\'">Download File</a>');
                 //via.downloadFile(url);
 
@@ -2729,6 +3098,55 @@ var odinFormBuilder = {
 
 
         $('#resultsPanel').fadeIn();
+    },
+
+    /**
+     * downloadWebServiceFile
+     * This will allow you to download the web service file.
+     */
+    downloadWebServiceFile: function(){
+        /*
+        kendo.ui.progress($("#treeExpandContainer"), true);
+        setTimeout(function(){
+            kendo.ui.progress($("#treeExpandContainer"),false);
+        },1000);
+        var url = odin.SERVLET_PATH + "?action=processmanager.downloadWebServiceFile&reportId=" + odinFormBuilder.reportId +
+            "&processKey=" + odinFormBuilder.jobName +
+            "&serverUrl=" + encodeURI(location.origin + "/ODIN/ODINServlet/") +
+            "&entityDir=" + encodeURI(odinFormBuilder.odinLite_entityDir) +
+            "&overrideUser=" + (via.undef(odinFormBuilder.odinLite_overrideUser,true)?"":odinFormBuilder.odinLite_overrideUser) +
+            "&currentDynamicStringVariables=" + encodeURI(JSON.stringify(odinFormBuilder.currentDynamicStringVariables)) +
+            "&currentStringIteratorSettingList=" + encodeURI(JSON.stringify(odinFormBuilder.currentStringIteratorSettingList));
+        window.location = url;
+         */
+
+        kendo.ui.progress($("#treeExpandContainer"), true);//Wait Message off
+        $.post(odin.SERVLET_PATH,
+            {
+                action: 'processmanager.downloadWebServiceFile',
+                reportId: odinFormBuilder.reportId,
+                processKey: odinFormBuilder.jobName,
+                serverUrl: location.origin + "/ODIN/ODINServlet/",
+                entityDir: odinFormBuilder.odinLite_entityDir,
+                overrideUser: odinFormBuilder.odinLite_overrideUser,
+                currentDynamicStringVariables: JSON.stringify(odinFormBuilder.currentDynamicStringVariables),
+                currentStringIteratorSettingList: JSON.stringify(odinFormBuilder.currentStringIteratorSettingList)
+            },
+            function (data, status) {
+                kendo.ui.progress($("#treeExpandContainer"), false);//Wait Message off
+
+                console.log('downloadWebServiceFile',data);
+
+                if (!via.undef(data, true) && data.success === false) {
+                    via.debug("Failure downloading file:", data.message);
+                    via.kendoAlert("Download Failure", data.message);
+                } else {
+                    via.debug("Successful Download:", data);
+
+                    via.downloadFile(odin.SERVLET_PATH + "?action=admin.streamFile&reportName=" + encodeURIComponent(data.reportName));
+                }
+            },
+            'json');
     },
 
     /**
