@@ -2055,6 +2055,14 @@ var odinFormBuilder = {
                         if (via.undef(text, true) || via.undef(value, true)) {
                             continue;
                         }
+                        //For limiting the date options.
+                        if(!via.undef(variable.dynamicDateList)){
+                            var idx = $.inArray(text,variable.dynamicDateList);
+                            if(idx === -1){
+                                continue;
+                            }
+                        }
+
                         var selected = '';
                         if (!via.undef(variable.defaultValue) && variable.defaultValue.indexOf(value) !== -1) {
                             selected = 'selected';
@@ -2875,6 +2883,7 @@ var odinFormBuilder = {
                             odinFormBuilder.currentData = data;
                             via.debug("Get DataSet Successful:", data, odinFormBuilder.reportId);
                             if(data.dataset.tablesets.length === 0){
+                                $('#smallLoadingMessage').hide();
                                 odin.alert("Get DataSet Error","No Data Found.");
                                 return;
                             }
@@ -3134,8 +3143,6 @@ var odinFormBuilder = {
             },
             function (data, status) {
                 kendo.ui.progress($("#treeExpandContainer"), false);//Wait Message off
-
-                console.log('downloadWebServiceFile',data);
 
                 if (!via.undef(data, true) && data.success === false) {
                     via.debug("Failure downloading file:", data.message);
