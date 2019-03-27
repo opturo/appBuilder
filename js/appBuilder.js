@@ -183,7 +183,7 @@ var odinFormBuilder = {
         //Job name not defined list the jobs.
         if(via.undef(params['jobname'],true)){
             //To setup for ODIN Lite
-            odinFormBuilder.setupODINLiteUser(params.entityname,params.entitydir,params.appname,params.overrideuser);
+            odinFormBuilder.setupODINLiteUser(params.entityname,params.entitydir,params.appname,params.overrideuser,params.isfreeonlyuser);
 
             odinFormBuilder.getProcessTree();
         }
@@ -201,9 +201,9 @@ var odinFormBuilder = {
 
     /**
      * setupODINLiteUser
-     * if the user is an ODIN Lite user then this will set them up.
+     * If the user is an ODIN Lite user then this will set them up.
      */
-    setupODINLiteUser: function(entityName,entityDir,appName,overrideUser){
+    setupODINLiteUser: function(entityName,entityDir,appName,overrideUser,isFreeOnlyUser){
         if(via.undef(entityName,true) || via.undef(entityDir,true)){
             return;
         }
@@ -216,6 +216,7 @@ var odinFormBuilder = {
         odinFormBuilder.odinLite_entityDir = entityDir;
         odinFormBuilder.odinLite_entityName = entityName;
         odinFormBuilder.odinLite_overrideUser = overrideUser;
+        //odinFormBuilder.isFreeOnlyUser = isFreeOnlyUser;
 
         //Display the entity
         var overrideHtml = "";
@@ -314,6 +315,7 @@ var odinFormBuilder = {
         }
 
         //Get the data if they
+        kendo.ui.progress($("body"), true);
         if(via.undef(odinFormBuilder.processTreeData)){
             odinFormBuilder.getProcessTreeFromServer(makeReportWindow);
         }else{
@@ -384,6 +386,8 @@ var odinFormBuilder = {
                     }
                 ]
             }).data("kendoDialog").open();
+
+            kendo.ui.progress($("body"), false);//Wait Off
 
             //Double click on the treeView
             $("#changeReport_treeview").data("kendoTreeView").items().each(function (i, el) {
@@ -568,7 +572,7 @@ var odinFormBuilder = {
             } else {
                 via.debug("Get Process Tree Successful:", data);
                 if (via.undef(data.data.CONFIG_TREE_LIST) || data.data.CONFIG_TREE_LIST.length === 0) {
-                    odin.alert("Get Process Tree Error", "No jobs defined for this user.");
+                    odin.alert("Get Process Tree Error", "No Reports found in your Profile.");
                     return;
                 }
 
@@ -671,7 +675,6 @@ var odinFormBuilder = {
                         odin.performTranslation('#jobDetailDisplay');
                     }
                 });
-
 
                 //Expand and Collapse Tree
                 $('#TOC_expandReportsButton').click(function(){
@@ -2875,6 +2878,7 @@ var odinFormBuilder = {
                     })).done(function(data){
                         $('.poweredPanel').hide();
                         data = JSON.parse(data.replace(/\bNaN\b/g, "null"));
+
                         if(!via.undef(data,true) && data.success === false){
                             via.debug("Get DataSet Failure:", data.message);
                             odin.alert("Get DataSet Error",data.message);
@@ -2882,6 +2886,7 @@ var odinFormBuilder = {
                         }else{
                             odinFormBuilder.currentData = data;
                             via.debug("Get DataSet Successful:", data, odinFormBuilder.reportId);
+                            via.debug("DataSet String:", JSON.stringify(data));
                             if(data.dataset.tablesets.length === 0){
                                 $('#smallLoadingMessage').hide();
                                 odin.alert("Get DataSet Error","No Data Found.");
