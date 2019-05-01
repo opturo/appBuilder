@@ -97,6 +97,9 @@ var odinFormBuilder = {
         //Get the params
         var params = via.getQueryParams();
 
+        //Set the parameter for the current application.
+        odinFormBuilder.currentApplication = params.appid;
+
         //Logout Button Visible and Set Action
         if(via.undef(params['hidelogout'],true) || params['hidelogout'].toLowerCase()!=='true') {
             $('#odinLogoutButton').click(function () {
@@ -216,7 +219,7 @@ var odinFormBuilder = {
         odinFormBuilder.odinLite_entityDir = entityDir;
         odinFormBuilder.odinLite_entityName = entityName;
         odinFormBuilder.odinLite_overrideUser = overrideUser;
-        //odinFormBuilder.isFreeOnlyUser = isFreeOnlyUser;
+        odinFormBuilder.isFreeOnlyUser = isFreeOnlyUser;
 
         //Display the entity
         var overrideHtml = "";
@@ -744,12 +747,15 @@ var odinFormBuilder = {
      * get the process tree for the current user from the server. Calls the callback and saves the data so it can be reused.
      */
     getProcessTreeFromServer: function(callbackFn){
+        console.log('odinFormBuilder.currentApplication',odinFormBuilder.currentApplication);
+
         //Call to the server to get the job info
         $.post(odin.SERVLET_PATH,
             $.extend(via.getQueryParams(), {
                 action: 'processmanager.getProcessTreeAllInfo',
                 reportId: odinFormBuilder.reportId,
-                overrideUser: odinFormBuilder.odinLite_overrideUser
+                overrideUser: odinFormBuilder.odinLite_overrideUser,
+                appId: odinFormBuilder.currentApplication
             }),
             function(data){
                 if(!via.undef(data,true) && data.success === false){
@@ -983,7 +989,7 @@ var odinFormBuilder = {
                     //Call to generate the HTML
                     var saveId = -1;
                     if(!via.undef(data.data.SAVE_ID)){ saveId = data.data.SAVE_ID; }
-                    odinFormBuilder.getFormHtml(variableList, sets, saveId);
+                    odinFormBuilder.getFormHtml(variableList, sets, saveId, data.data.executeButtonLabel);
 
 
                     //Debug Detail and useExternalJVM
@@ -1034,7 +1040,7 @@ var odinFormBuilder = {
      * @param variables - The name of the job to get
      * @param sets - The sets of data to build html for
      */
-    getFormHtml: function(variables,sets,saveId){
+    getFormHtml: function(variables,sets,saveId, executeButtonLabel){
 
         //Loop through variables to see if there are groups.
         odinFormBuilder.groupedVariables = {};
@@ -1121,9 +1127,20 @@ var odinFormBuilder = {
             html = formHtml + html +
                     '<div class="row">' +
                         '<div class="col-sm-12">' +
-                            '<div class="text-center">' +
-                                '<button type="submit" class="tr btn btn-primary">Generate Report</button>' +
-                            '</div>' +
+                            '<div class="text-center">';
+
+            //Generate Report Button
+            if(!via.undef(executeButtonLabel,true)){
+                if(executeButtonLabel.toUpperCase().startsWith("HTML:")){
+                    html += executeButtonLabel.substring(5);
+                }else{
+                    html += '<button type="submit" class="tr btn btn-primary">'+executeButtonLabel+'</button>';
+                }
+            }else {
+                html += '<button type="submit" class="tr btn btn-primary">Generate Report</button>';
+            }
+
+            html+=          '</div>' +
                         '</div>' +
                     '</div>' +
                 '</form>';
@@ -1142,9 +1159,18 @@ var odinFormBuilder = {
                     '<span class="glyphicon glyphicon-floppy-disk" aria-hidden="true"></span>' +
                     '</button>';
             }
+
             //Generate Report Button
-            html += '<button style="float:right;margin:10px 0 10px 0;" type="submit" class="tr btn btn-primary">Generate Report</button>' +
-                '</form>';
+            if(!via.undef(executeButtonLabel,true)){
+                if(executeButtonLabel.toUpperCase().startsWith("HTML:")){
+                    html += executeButtonLabel.substring(5);
+                }else{
+                    html += '<button style="float:right;margin:10px 0 10px 0;" type="submit" class="tr btn btn-primary">'+executeButtonLabel+'</button>';
+                }
+            }else {
+                html += '<button style="float:right;margin:10px 0 10px 0;" type="submit" class="tr btn btn-primary">Generate Report</button>';
+            }
+            html += '</form>';
         }
         //End - Add the form Controls
 
