@@ -99,6 +99,12 @@ var odinFormBuilder = {
 
         //Set the parameter for the current application.
         odinFormBuilder.currentApplication = params.appid;
+        odinFormBuilder.currentApplicationName = params.appname;
+        $(".breadcrumbNav").empty();
+        if(!via.undef(odinFormBuilder.currentApplication) && !via.undef(odinFormBuilder.currentApplicationName)){
+            $(".breadcrumbNav").html(`<a href="#" onclick="odinFormBuilder.loadApplicationHome();">
+            <i class="fa fa-arrow-circle-o-left" aria-hidden="true"></i> ${odinFormBuilder.currentApplicationName}</a>`);
+        }
 
         //Logout Button Visible and Set Action
         if(via.undef(params['hidelogout'],true) || params['hidelogout'].toLowerCase()!=='true') {
@@ -200,6 +206,16 @@ var odinFormBuilder = {
         setTimeout(function() {
             $('#smallLoadingMessage').hide();
         },100);
+    },
+
+    /**
+     * loadApplicationHome
+     * This will load the home screen fort he selected application in SAYS
+     */
+    loadApplicationHome: function(){
+        window.location = "../"+odin.ODIN_LITE_DIR+"/?entityDir="+odinFormBuilder.odinLite_entityDir+"&entityName="+odinFormBuilder.odinLite_entityName+
+            "&overrideUser="+(via.undef(odinFormBuilder.odinLite_overrideUser,true)?"":odinFormBuilder.odinLite_overrideUser) +
+        "&appId="+odinFormBuilder.currentApplication + "&appName="+odinFormBuilder.currentApplicationName;
     },
 
     /**
