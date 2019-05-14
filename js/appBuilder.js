@@ -100,6 +100,7 @@ var odinFormBuilder = {
         //Set the parameter for the current application.
         odinFormBuilder.currentApplication = params.appid;
         odinFormBuilder.currentApplicationName = params.appname;
+        odinFormBuilder.currentApplicationPackage = params.apppackage;
         $(".breadcrumbNav").empty();
         if(!via.undef(odinFormBuilder.currentApplication) && !via.undef(odinFormBuilder.currentApplicationName)){
             $(".breadcrumbNav").html(`<a href="#" onclick="odinFormBuilder.loadApplicationHome();">
@@ -215,7 +216,8 @@ var odinFormBuilder = {
     loadApplicationHome: function(){
         window.location = "../"+odin.ODIN_LITE_DIR+"/?entityDir="+odinFormBuilder.odinLite_entityDir+"&entityName="+odinFormBuilder.odinLite_entityName+
             "&overrideUser="+(via.undef(odinFormBuilder.odinLite_overrideUser,true)?"":odinFormBuilder.odinLite_overrideUser) +
-        "&appId="+odinFormBuilder.currentApplication + "&appName="+odinFormBuilder.currentApplicationName;
+            "&appId="+odinFormBuilder.currentApplication + "&appName="+odinFormBuilder.currentApplicationName +
+            "&appPackage="+odinFormBuilder.currentApplicationPackage;
     },
 
     /**
