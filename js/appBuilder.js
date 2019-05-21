@@ -765,7 +765,6 @@ var odinFormBuilder = {
      * get the process tree for the current user from the server. Calls the callback and saves the data so it can be reused.
      */
     getProcessTreeFromServer: function(callbackFn){
-        console.log('odinFormBuilder.currentApplication',odinFormBuilder.currentApplication);
 
         //Call to the server to get the job info
         $.post(odin.SERVLET_PATH,
@@ -2416,6 +2415,13 @@ var odinFormBuilder = {
         formData.forEach(function(value, key){
             jsonObject[key] = value;
         });
+        /*for(var pair of formData.entries()) {
+            console.log(pair[0]+ ', '+ pair[1]);
+            var key = pair[0];
+            var value = pair[1];
+            jsonObject[key] = value;
+        }*/
+
         if(!via.undef(odinFormBuilder.DYNAMIC_SETTING_LIST)){
             for(var i=0;i<odinFormBuilder.DYNAMIC_SETTING_LIST.length;i++){
                 var variable = odinFormBuilder.DYNAMIC_SETTING_LIST[i];
