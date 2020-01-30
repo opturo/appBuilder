@@ -27,6 +27,10 @@ var odinFormBuilder = {
     OUTPUT_TYPE_DASHBOARD: 3,
     OUTPUT_TYPE_TABLE_DESIGNER: 4,
     OUTPUT_TYPE_ENVISION: 5,
+    OUTPUT_TYPE_FILE_MANAGER: 6,
+    OUTPUT_TYPE_DATA_MANAGER: 7,
+
+    DASHBOARD_SAVE_SUFFIX: 3172,
 
     STYLE: 'info',
 
@@ -41,6 +45,21 @@ var odinFormBuilder = {
     currentData: null,//Holds the current data for the process
     selectedImages: {},//Holds the image name of the previously selected image
     groupedVariables: {},//Holds the grouping grids if there are any.
+    hideNav: false, //If true this launches the window without the nav and hides many buttons
+    printMode: false, //If true this launches the window without the nav and hides many buttons
+    //Types of paper:
+    paperTypes: {
+        //"Letter": {"width":"2550px","height":"3300px"},
+        "Letter": {"width":"215.9mm","height":"279.4mm"},
+        "Legal": {"width":"215.9mm","height":"355.6mm"},
+        //"Tabloid": {"width":"279.4mm","height":"431.8mm"},
+        //"A0": {"width":"841mm","height":"1189mm"},
+        //"A1": {"width":"420mm","height":"594mm"},
+        //"A2": {"width":"297mm","height":"420mm"},
+        "A3": {"width":"210mm","height":"297mm"},
+        "A4": {"width":"210mm","height":"297mm"},
+        "A5": {"width":"148mm","height":"210mm"}
+    },
 
     //For ODIN Lite
     odinLite_entityDir: null,
@@ -65,21 +84,41 @@ var odinFormBuilder = {
             }
         });
 
+        //Check for nav hiding
+        odinFormBuilder.hideNav = (via.getParamsValue('hidenav') === "true");
+        odinFormBuilder.setupPrintMode();
+        odinFormBuilder.hideNavButtons();
+        $(window).scrollTop(0);
 
         //Add the loading message
-        $('#smallLoadingMessage').show();
+        if(!odinFormBuilder.hideNav) {
+            $('#smallLoadingMessage').show();
+            $('#mainNavbar').show();
+            $('.poweredPanel').show();
+        }
 
-        //odinPerformance.setUserLoggedIn;
-        odin.userIsLoggedIn(odinFormBuilder.setUserLoggedIn,function(){
-            //Get the params
-            //var params = via.getQueryParams();
-            var queryString = "";
-            var paramString = odin.getParameterString();
-            if(!via.undef(paramString,true)){
-                queryString += "&"+paramString;
-            }
-            window.location = '../index.jsp?referrer=./appBuilder/index.html' + queryString;
-        });
+        if((via.getParamsValue('logoutuser') === "true")) {
+            odin.logoutUser(function () {
+                kendo.ui.progress($("body"), false);
+                checkUserLoggedIn();
+            }, true);
+        }else{
+            checkUserLoggedIn();
+        }
+
+        function checkUserLoggedIn() {
+            //odinPerformance.setUserLoggedIn;
+            odin.userIsLoggedIn(odinFormBuilder.setUserLoggedIn, function () {
+                //Get the params
+                //var params = via.getQueryParams();
+                var queryString = "";
+                var paramString = odin.getParameterString();
+                if (!via.undef(paramString, true)) {
+                    queryString += "&" + paramString;
+                }
+                window.location = '../index.jsp?referrer=./appBuilder/index.html' + queryString;
+            });
+        }
     },
 
     /**
@@ -101,6 +140,7 @@ var odinFormBuilder = {
         odinFormBuilder.currentApplication = params.appid;
         odinFormBuilder.currentApplicationName = params.appname;
         odinFormBuilder.currentApplicationPackage = params.apppackage;
+
         $(".breadcrumbNav").empty();
         if(!via.undef(odinFormBuilder.currentApplication) && !via.undef(odinFormBuilder.currentApplicationName)){
             $(".breadcrumbNav").html(`<a href="#" onclick="odinFormBuilder.loadApplicationHome();">
@@ -156,6 +196,7 @@ var odinFormBuilder = {
         //Assign an action to the back button
         $('#formBuilder_backButton').click(function(){
             $('#smallLoadingMessage').hide();
+            odinFormBuilder.hideDashboardButtons();
             $('#resultsPanel').hide();
             $('#mainPanel').fadeIn();
             $('#formBuilder_resultButtons').hide();
@@ -515,11 +556,22 @@ var odinFormBuilder = {
 
         //window.location = url; //Older way to switch jobs.
 
+        //Update the CSS from print mode.
+        $('body').css("width","100%");
+        $('body').css("height","100%");
+        $('body').css("min-height","100%");
+        $('html').css("width","100%");
+        $('html').css("height","100%");
+        $('html').css("min-height","100%");
+
         //Update the link to the page.
         if (history.pushState) {
             //var newurl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?myNewUrlQuery=1';
             window.history.pushState({path:url},'',url);
         }
+
+        odinDashboard.isFirstLoad = true;
+
         //Call the job form breakdown.
         odinFormBuilder.getJobFormBreakdown(jobKey);
     },
@@ -538,6 +590,11 @@ var odinFormBuilder = {
                 return "No Display";
             case odinFormBuilder.OUTPUT_TYPE_TABLE_DESIGNER:
                 return "Table Designer";
+            case odinFormBuilder.OUTPUT_TYPE_FILE_MANAGER:
+                return "File Manager";
+            case odinFormBuilder.OUTPUT_TYPE_DATA_MANAGER:
+            return "Data Manager";
+
         }
     },
 
@@ -899,7 +956,6 @@ var odinFormBuilder = {
      */
     getJobFormBreakdown: function(jobName){
         //Cleanup a previous run
-        $('.poweredPanel').show();
         $('#resultsPanel').empty();
         $('#resultsPanel').hide();
         $('#formBuilder_resultButtons').hide();
@@ -946,6 +1002,8 @@ var odinFormBuilder = {
                     odinFormBuilder.checkODINLiteRedirect(data.data.isODINLiteUser);
 
                     var variableList = data.data['DYNAMIC_SETTING_LIST'];
+                    variableList = odinFormBuilder.queryStringVariableOverride(variableList,data.data.overrideIterValues);//Override any query string args.
+
                     if(!via.undef(data.data['jobName'])) {
                         odinFormBuilder.jobFriendlyName = data.data['jobName'];
                         //Title
@@ -1034,9 +1092,16 @@ var odinFormBuilder = {
                         $("#debugDetail_div").hide();
                     }
 
+                    //Autorun is enabled. Hide the main panel
+                    var autoRun = via.getParamsValue("autorun");
+                    if(!via.undef(autoRun) && autoRun.toLowerCase() === "true") {
+                        $('#mainPanel').hide();
+                    }
+
                     //Try to load default report
                     if(!via.undef(data.data.SAVE_ID)) {
                         via.loadDefaultReport(odin.PROCESS_MANAGER_APP_ID,data.data.SAVE_ID,function(json,reportName){
+
                             //Add the report name
                             $('.savedReportName').empty();
                             if(!via.undef(reportName,true)) {
@@ -1044,11 +1109,59 @@ var odinFormBuilder = {
                             }
                             //Load the settings
                             odinFormBuilder.loadReportSettings(json, variableList);
+
+                            odinFormBuilder.checkAutoRunReport();
+                        },
+                        function(){//No default
+                            odinFormBuilder.checkAutoRunReport();
                         });
+                    }else{
+                        odinFormBuilder.checkAutoRunReport();
                     }
                 }
             },
             'json');
+    },
+
+    /**
+     * This will auto run a report if need be.
+     */
+    checkAutoRunReport: function(){
+        //This is to auto run a report.
+        var autoRun = via.getParamsValue("autorun");
+        if(!via.undef(autoRun) && autoRun.toLowerCase() === "true"){
+            setTimeout(function(){
+                $('button[type="submit"]').trigger('click');
+            },10);
+        }
+    },
+
+
+    /**
+     * queryStringVariableOverride
+     * This method take in a list of iterator variables and overrides the default values of
+     * the variable if they are present in the query string.
+     */
+    queryStringVariableOverride: function(variableList,overrideIterValues){
+        if(via.undef(variableList) || variableList.length === 0){ return variableList; }
+        if(via.undef(overrideIterValues)){ return variableList; }
+
+        for(var i=0;i<variableList.length;i++){
+            var currVar = variableList[i];
+            if(via.undef(currVar.variableName)){ continue; }
+
+            //There is an override...
+            var overrideVal = overrideIterValues[currVar.variableName.toUpperCase()];
+            if(!via.undef(overrideVal)){
+                if(!via.undef(currVar.delimiter) && overrideVal.includes(currVar.delimiter)){
+                    currVar.defaultValue = overrideVal.split(currVar.delimiter);
+                }else {
+                    currVar.defaultValue = [overrideVal];
+                }
+            }
+        }
+
+        return variableList;
     },
 
     /**
@@ -1151,10 +1264,18 @@ var odinFormBuilder = {
                 if(executeButtonLabel.toUpperCase().startsWith("HTML:")){
                     html += executeButtonLabel.substring(5);
                 }else{
-                    html += '<button type="submit" class="tr btn btn-primary">'+executeButtonLabel+'</button>';
+                    if(odinFormBuilder.hideNav){
+                        html += '<button style="margin-top:10px;" type="submit" class="tr executeButton btn btn-primary">' + executeButtonLabel + '</button>';
+                    }else {
+                        html += '<button type="submit" class="tr executeButton btn btn-primary">' + executeButtonLabel + '</button>';
+                    }
                 }
             }else {
-                html += '<button type="submit" class="tr btn btn-primary">Generate Report</button>';
+                if(odinFormBuilder.hideNav){
+                    html += '<button style="margin-top:10px;" type="submit" class="tr executeButton btn btn-primary">Generate Report</button>';
+                }else {
+                    html += '<button type="submit" class="tr executeButton btn btn-primary">Generate Report</button>';
+                }
             }
 
             html+=          '</div>' +
@@ -1182,10 +1303,10 @@ var odinFormBuilder = {
                 if(executeButtonLabel.toUpperCase().startsWith("HTML:")){
                     html += executeButtonLabel.substring(5);
                 }else{
-                    html += '<button style="float:right;margin:10px 0 10px 0;" type="submit" class="tr btn btn-primary">'+executeButtonLabel+'</button>';
+                    html += '<button style="float:right;margin:10px 0 10px 0;" type="submit" class="tr executeButton btn btn-primary">'+executeButtonLabel+'</button>';
                 }
             }else {
-                html += '<button style="float:right;margin:10px 0 10px 0;" type="submit" class="tr btn btn-primary">Generate Report</button>';
+                html += '<button style="float:right;margin:10px 0 10px 0;" type="submit" class="tr executeButton btn btn-primary">Generate Report</button>';
             }
             html += '</form>';
         }
@@ -1193,6 +1314,10 @@ var odinFormBuilder = {
 
         $('#mainPanel').empty();
         $('#mainPanel').html(html);
+        var hideButton = via.getParamsValue('hidebutton');
+        if(!via.undef(hideButton) && hideButton.toLowerCase()=="true"){
+            $('.executeButton').hide();
+        }
 
         //Save and load setting buttons events.
         if(!via.undef(saveId) && saveId !== -1) {
@@ -1227,180 +1352,15 @@ var odinFormBuilder = {
         //Perform translation if needed.
         odin.performTranslation('#formBuilder_form');
 
-        //Style the multi-select boxes.
-        /*
-        $(".kendo-select").kendoMultiSelect({
-            filter: "contains",
-            dataTextField: "text",
-            dataValueField: "value",
-            dataSource: {
-                pageSize: odinFormBuilder.MAX_DROPDOWN_ELEMENTS
-            }
-        });
-        */
-        //Replaced when we did page size
-        var multiSelect = $(".kendo-select");
-        for(var i=0;i<multiSelect.length;i++){
-            $(multiSelect[i]).kendoMultiSelect({
-                filter: "contains",
-                dataTextField: "text",
-                dataValueField: "value",
-                dataSource: {
-                    pageSize: odinFormBuilder.MAX_DROPDOWN_ELEMENTS
-                }
-            });
-        }
-        //Style the Dropdown list (single select)
-        /*
-        var dropdownlist = $(".kendo-single-select").kendoDropDownList({
-            filter: "contains",
-            optionLabel: " ",
-            dataTextField: "text",
-            dataValueField: "value",
-            //dataSource: {
-            //    pageSize: odinFormBuilder.MAX_DROPDOWN_ELEMENTS
-            //}
-        }).data("kendoDropDownList");
-        */
-        //Replaced when we did page size
-        var dropdownlist = $(".kendo-single-select");
-        for(var i=0;i<dropdownlist.length;i++) {
-            //Make the dropdown
-            $(dropdownlist[i]).kendoDropDownList({
-                filter: "contains",
-                //optionLabel: " ",
-                dataTextField: "text",
-                dataValueField: "value",
-                dataSource: {
-                    pageSize: odinFormBuilder.MAX_DROPDOWN_ELEMENTS
-                }
-            });
-        }
-
-        //For dynamic dates
-        var dropdownlist = $(".kendo-dynamic-date");
-        for(var i=0;i<dropdownlist.length;i++) {
-            //Make the dropdown
-            var dd = $(dropdownlist[i]).kendoDropDownList({
-                filter: "contains",
-                //optionLabel: " ",
-                dataTextField: "text",
-                dataValueField: "value",
-                dataSource: {
-                    pageSize: odinFormBuilder.MAX_DROPDOWN_ELEMENTS
-                },
-                change: function(a,b){
-                    var name = $(a.sender.element).prop("name");
-                    var span = $("#"+name + "Example");
-                    span.empty();
-                    if(!via.undef(odinFormBuilder.dynamicDateExampleDate) && !via.undef(odinFormBuilder.dynamicDateExampleDate[a.sender.value()])){
-                        span.html("<i>"+odinFormBuilder.dynamicDateExampleDate[a.sender.value()] + "</i>");
-                    }
-                }
-            }).data('kendoDropDownList');
-            dd.trigger("change");
-        }
-
-        //Fix for defaulting to nothing if there is no default value . Kendo defaults to first value
-        for(var i=0;i<variables.length;i++){
-            if(via.undef(variables[i].type) || variables[i].type!==7){continue;}
-            if(via.undef(variables[i].defaultValue) || variables[i].defaultValue.length === 0 || variables[i].defaultValue[0].length===0){
-                $('#'+variables[i].variableName+"_inputField").data("kendoDropDownList").value("");
-                //$('#'+variables[i].variableName+"_inputField").data("kendoComboBox").select(-1);
-            }
-        }
-        //$(".kendo-single-select").focusin(function(){
-         //   $(this).select();
-        //});
-        //$(".kendo-single-select").attr("readonly", "readonly");
-
-        //Style the Date Boxes - get the correct formatting
-        var dateFormat = odin.DEFAULT_DATE_FORMAT;
-        if(!via.undef(odin.getUserSpecificSetting("defaultDateFormat"))){ dateFormat = odin.getUserSpecificSetting("defaultDateFormat"); }
-        $(".kendo-date").kendoDatePicker({
-            format: dateFormat
-        });
-        //This is to validate the date and it will also parse if it can
-        $(".kendo-date").blur(function(){
-            if($(this).data('kendoDatePicker') === undefined){ return; }
-            var value = $(this).data('kendoDatePicker').value();
-
-            //Try to parse else just get rid of it...
-            if(value === null){
-                var dateString = $(this).val();
-                if(!via.undef(dateString,true)){
-                    var date = $.format.date(dateString, 'yyyyMMdd');
-                    if(date !== 0){
-                        $(this).data('kendoDatePicker').value(date);
-                       return;
-                    }
-                    date = $.format.date(dateString, 'MM/dd/yyyy');
-                    if(date !== 0){
-                        $(this).data('kendoDatePicker').value(date);
-                        return;
-                    }
-                }
-                $(this).data('kendoDatePicker').value(null);
-            }
-        });
-
-        //Style the file boxes
-        $(".kendo-file").kendoUpload({
-            multiple: false,
-            localization: {
-                select: "Select a file..."
-            },
-            validation: {
-                maxFileSize: odinFormBuilder.MAX_FILE_SIZE
-            }
-        });
-
-        $(".kendo-multiple-file").kendoUpload({
-            multiple: true,
-            localization: {
-                select: "Select files..."
-            },
-            validation: {
-                maxFileSize: odinFormBuilder.MAX_FILE_SIZE
-            }
-        });
-
-        //Style the image box
-        $(".kendo-image-file").kendoUpload({
-            multiple: false,
-            localization: {
-                select: "Select an image..."
-            },
-            validation: {
-                allowedExtensions: [".jpg",".png",".gif"],
-                maxFileSize: odinFormBuilder.MAX_FILE_SIZE
-            }
-        });
-
-        //Style the color choosers
-        $(".kendo-color-chooser").kendoColorPicker({
-            buttons: false
-        });
-
-
-
-        //Style the numberic boxes
-        $(".kendo-integer").kendoNumericTextBox({
-            format: "#,##0",
-            decimals: 0
-        });
-        $(".kendo-double").kendoNumericTextBox({
-            format: "#,##0.00######",
-            decimals: 8
-        });
+        //Setup the widgets
+        odinFormBuilder.inititalizeKendoWidgets(variables);
 
         //Make the grouping grids.
         $.each(odinFormBuilder.groupedVariables,function(grp){
             var variables = odinFormBuilder.groupedVariables[grp];
 
-            var height = $("#"+via.cleanId(grp)+"_groupButton").closest('.panel-info').height();
             $("#groupGrid_"+via.cleanId(grp)).kendoGrid({
-                height:(height-80),
+                height:"150px",
                 selectable: true
             });
 
@@ -1537,15 +1497,187 @@ var odinFormBuilder = {
     },
 
     /**
+     * Makes all the widgets work
+     */
+    inititalizeKendoWidgets: function(variables){
+        //Style the multi-select boxes.
+        /*
+         $(".kendo-select").kendoMultiSelect({
+         filter: "contains",
+         dataTextField: "text",
+         dataValueField: "value",
+         dataSource: {
+         pageSize: odinFormBuilder.MAX_DROPDOWN_ELEMENTS
+         }
+         });
+         */
+        //Replaced when we did page size
+        var multiSelect = $(".kendo-select");
+        for(var i=0;i<multiSelect.length;i++){
+            $(multiSelect[i]).kendoMultiSelect({
+                filter: "contains",
+                dataTextField: "text",
+                dataValueField: "value",
+                dataSource: {
+                    pageSize: odinFormBuilder.MAX_DROPDOWN_ELEMENTS
+                }
+            });
+        }
+        //Style the Dropdown list (single select)
+        /*
+         var dropdownlist = $(".kendo-single-select").kendoDropDownList({
+         filter: "contains",
+         optionLabel: " ",
+         dataTextField: "text",
+         dataValueField: "value",
+         //dataSource: {
+         //    pageSize: odinFormBuilder.MAX_DROPDOWN_ELEMENTS
+         //}
+         }).data("kendoDropDownList");
+         */
+        //Replaced when we did page size
+        var dropdownlist = $(".kendo-single-select");
+        for(var i=0;i<dropdownlist.length;i++) {
+            //Make the dropdown
+            $(dropdownlist[i]).kendoDropDownList({
+                filter: "contains",
+                //optionLabel: " ",
+                dataTextField: "text",
+                dataValueField: "value",
+                dataSource: {
+                    pageSize: odinFormBuilder.MAX_DROPDOWN_ELEMENTS
+                }
+            });
+        }
+
+        //For dynamic dates
+        var dropdownlist = $(".kendo-dynamic-date");
+        for(var i=0;i<dropdownlist.length;i++) {
+            //Make the dropdown
+            var dd = $(dropdownlist[i]).kendoDropDownList({
+                filter: "contains",
+                //optionLabel: " ",
+                dataTextField: "text",
+                dataValueField: "value",
+                dataSource: {
+                    pageSize: odinFormBuilder.MAX_DROPDOWN_ELEMENTS
+                },
+                change: function(a,b){
+                    var name = $(a.sender.element).prop("name");
+                    var span = $("#"+name + "Example");
+                    span.empty();
+                    if(!via.undef(odinFormBuilder.dynamicDateExampleDate) && !via.undef(odinFormBuilder.dynamicDateExampleDate[a.sender.value()])){
+                        span.html("<i>"+odinFormBuilder.dynamicDateExampleDate[a.sender.value()] + "</i>");
+                    }
+                }
+            }).data('kendoDropDownList');
+            dd.trigger("change");
+        }
+
+        //Fix for defaulting to nothing if there is no default value . Kendo defaults to first value
+        for(var i=0;i<variables.length;i++){
+            if(via.undef(variables[i].type) || variables[i].type!==7){continue;}
+            if(via.undef(variables[i].defaultValue) || variables[i].defaultValue.length === 0 || variables[i].defaultValue[0].length===0){
+                $('#'+variables[i].variableName+"_inputField").data("kendoDropDownList").value("");
+                //$('#'+variables[i].variableName+"_inputField").data("kendoComboBox").select(-1);
+            }
+        }
+        //$(".kendo-single-select").focusin(function(){
+        //   $(this).select();
+        //});
+        //$(".kendo-single-select").attr("readonly", "readonly");
+
+        //Style the Date Boxes - get the correct formatting
+        var dateFormat = odin.DEFAULT_DATE_FORMAT;
+        if(!via.undef(odin.getUserSpecificSetting("defaultDateFormat"))){ dateFormat = odin.getUserSpecificSetting("defaultDateFormat"); }
+        $(".kendo-date").kendoDatePicker({
+            format: dateFormat
+        });
+        //This is to validate the date and it will also parse if it can
+        $(".kendo-date").blur(function(){
+            if($(this).data('kendoDatePicker') === undefined){ return; }
+            var value = $(this).data('kendoDatePicker').value();
+
+            //Try to parse else just get rid of it...
+            if(value === null){
+                var dateString = $(this).val();
+                if(!via.undef(dateString,true)){
+                    var date = $.format.date(dateString, 'yyyyMMdd');
+                    if(date !== 0){
+                        $(this).data('kendoDatePicker').value(date);
+                        return;
+                    }
+                    date = $.format.date(dateString, 'MM/dd/yyyy');
+                    if(date !== 0){
+                        $(this).data('kendoDatePicker').value(date);
+                        return;
+                    }
+                }
+                $(this).data('kendoDatePicker').value(null);
+            }
+        });
+
+        //Style the file boxes
+        $(".kendo-file").kendoUpload({
+            multiple: false,
+            localization: {
+                select: "Select a file..."
+            },
+            validation: {
+                maxFileSize: odinFormBuilder.MAX_FILE_SIZE
+            }
+        });
+
+        $(".kendo-multiple-file").kendoUpload({
+            multiple: true,
+            localization: {
+                select: "Select files..."
+            },
+            validation: {
+                maxFileSize: odinFormBuilder.MAX_FILE_SIZE
+            }
+        });
+
+        //Style the image box
+        $(".kendo-image-file").kendoUpload({
+            multiple: false,
+            localization: {
+                select: "Select an image..."
+            },
+            validation: {
+                allowedExtensions: [".jpg",".png",".gif"],
+                maxFileSize: odinFormBuilder.MAX_FILE_SIZE
+            }
+        });
+
+        //Style the color choosers
+        $(".kendo-color-chooser").kendoColorPicker({
+            buttons: false
+        });
+
+
+
+        //Style the numberic boxes
+        $(".kendo-integer").kendoNumericTextBox({
+            format: "#,##0",
+            decimals: 0
+        });
+        $(".kendo-double").kendoNumericTextBox({
+            format: "#,##0.00######",
+            decimals: 8
+        });
+    },
+
+    /**
      * loadReportSettings
      * This method will set the saved settings into the report.
      */
     loadReportSettings: function(loadJson, variables){
         //console.log('loadJson',loadJson);
+        //console.log('variables',variables);
 
         //Load the groups.
         $.each(odinFormBuilder.groupedVariables,function(grp){
-
             if(!via.undef(loadJson[via.cleanId(grp) + "_grid"])){
                 var grid = $("#groupGrid_" + via.cleanId(grp)).data('kendoGrid');
                 grid.dataSource.data([]);
@@ -1596,14 +1728,18 @@ var odinFormBuilder = {
                     }
                     break;
                 case odinFormBuilder.DATE_FIELD:
-                    if(!via.undef(loadJson[varName],true)){//Check for the saved variable
+                    if(!via.undef(loadJson[varName],true) || !via.undef(loadJson[varName+"_dynamic"],true)){//Check for the saved variable
                         if(!via.undef(loadJson[varName + "_dateType"]) && loadJson[varName + "_dateType"] === 'dynamic'){
                             var singleSelect = $('#' + varName + "_dynamicField").data("kendoDropDownList");
-                            singleSelect.value(loadJson[varName]);
+                            if(!via.undef(loadJson[varName+"_dynamic"])){
+                                singleSelect.value(loadJson[varName+"_dynamic"]);
+                            }else{
+                                singleSelect.value(loadJson[varName]);
+                            }
                             singleSelect.trigger("change");
                         }else{
                             if(via.undef($( "input[name='"+currVar.variableName+"']")) || $( "input[name='"+currVar.variableName+"']").length === 0){continue;}
-                            var dte = kendo.parseDate(loadJson[varName], odin.DEFAULT_DATE_SAVE_FORMAT);
+                            var dte = kendo.parseDate(loadJson[varName], [odin.DEFAULT_DATE_SAVE_FORMAT,'yyyyMMdd']);
                             $( "input[name='"+currVar.variableName+"']").data("kendoDatePicker").value(dte);
                         }
                     }
@@ -1974,7 +2110,17 @@ var odinFormBuilder = {
             defaultValue = variable.defaultValue[0];
             if(variable.type === odinFormBuilder.DATE_FIELD && !via.undef(defaultValue,true)){
                 var date = $.format.date(defaultValue, 'yyyyMMdd');
-                defaultValue = $.format.date(date, 'yyyy-MM-dd');
+                try {
+                    defaultValue = $.format.date(date, 'yyyy-MM-dd');
+                }catch(err){
+                    date = $.format.date(defaultValue, 'MM/dd/yyyy');
+                    try {
+                        defaultValue = $.format.date(date, 'yyyy-MM-dd');
+                    }catch(err){
+                        date = $.format.date(defaultValue, 'dd-MMM-yyyy');
+                        defaultValue = $.format.date(date, 'yyyy-MM-dd');
+                    }
+                }
             }
         }
 
@@ -1998,10 +2144,10 @@ var odinFormBuilder = {
                         '<div class="col-md-12">' +
                             //Start Date
                             '<label for="'+variable.variableName+'_S">'+variable.label+' Start Date</label>' +
-                            '<input style="width:100%;" type="date" class="kendo-date" name="'+variable.variableName+'_S" placeholder="" value="'+startDefaultValue+'">' +
+                            '<input style="width:100%;" type="date" class="kendo-date" name="'+variable.variableName+'_S" placeholder="" value="'+startDefaultValue+'" />' +
                             //End Date
-                            '<label for="'+variable.variableName+'_E">'+variable.label+' End Date</label>' +
-                            '<input style="width:100%;" type="date" class="kendo-date" name="'+variable.variableName+'_E" placeholder="" value="'+endDefaultValue+'">' +
+                            '<label style="margin-top:10px;" for="'+variable.variableName+'_E">'+variable.label+' End Date</label>' +
+                            '<input style="width:100%;" type="date" class="kendo-date" name="'+variable.variableName+'_E" placeholder="" value="'+endDefaultValue+'" />' +
                         '</div>' +
                     '</div>';
                 break;
@@ -2155,6 +2301,10 @@ var odinFormBuilder = {
                     '</label>' +
                     '<select id="'+variable.variableName+'_inputField" style="width:100%;" name="'+variable.variableName+'" class="kendo-single-select form-control">';
 
+                //Append null value if needed
+                if(via.undef(variable.appendNullItem) || variable.appendNullItem === true) {
+                    fieldHtml += '<option value=""> </option>';
+                }
 
                 if(!via.undef(variable.valueList,true)) {//Check for empty values
                     for (var i = 0; i < variable.valueList.length; i++) {//Loop through elements
@@ -2377,11 +2527,12 @@ var odinFormBuilder = {
         //Setup the log area
         $('#formBuilder_showLogContainer').hide();
         $('#formBuilder_showLogContainer').empty();
-        $('#formBuilder_showLogButton').show();
+        if(!odinFormBuilder.hideNav)
+            $('#formBuilder_showLogButton').show();
         $('#formBuilder_terminateJobButton').prop( "disabled", false );
         if(!via.undef(odinFormBuilder.isUseInternalJVMEnabled) && odinFormBuilder.isUseInternalJVMEnabled===true){
             $('#formBuilder_terminateJobButton').hide();
-        }else{
+        }else if(!odinFormBuilder.hideNav){
             $('#formBuilder_terminateJobButton').show();
         }
 
@@ -2549,7 +2700,8 @@ var odinFormBuilder = {
         $.post(odin.SERVLET_PATH,
             $.extend(via.getQueryParams(), {
                 action: 'processmanager.getLog',
-                reportId: odinFormBuilder.reportId
+                reportId: odinFormBuilder.reportId,
+                processKey: odinFormBuilder.jobName
             }),
             function(data){
                 if(!via.undef(data,true) && data.success === false){
@@ -2558,7 +2710,38 @@ var odinFormBuilder = {
                     odin.alert("Get Log Error",data.message);
                 }else{
                     via.debug("Get Log Successful:", data);
-                    via.alert("Log File",data.log);
+                    //via.alert("Log File",data.log);
+
+                    var id = 'logWindow_' + via.randomString(5);
+                    $("body").append('<div id="'+id+'">' +
+                        data.log +
+                        '</div>');
+
+                    var selector = $("#"+id);
+                    var logWin = selector.kendoWindow({
+                        //html: data.log,
+                        iframe: false,
+                        title: 'Log File',
+                        actions: ["print","Maximize", "Close"],
+                        modal: true,
+                        width: '80%',
+                        height: '90%',
+                        close: function () {
+                            selector.remove();
+                            logWin = null;
+                        }
+                    }).data('kendoWindow');
+                    logWin.center();
+
+                    //Printing
+                    logWin.wrapper
+                        .find(".k-i-print").parent().attr("title","Print Layout");
+                    logWin.wrapper
+                        .find(".k-i-print").parent().click(function (e) {
+                        var regex = /<br\s*[\/]?>/gi;
+                        via.downloadClientSideToFile(data.log.replace(regex, ""),"processLog.txt");
+                        e.preventDefault();
+                    });
                 }
             },
             'json');
@@ -2566,7 +2749,7 @@ var odinFormBuilder = {
 
     /**
      * terminateJob
-     * this will end a curently running job
+     * this will end a currently running job
      */
     terminateJob: function(){
         //Call to the server to get the job info
@@ -2600,7 +2783,8 @@ var odinFormBuilder = {
         $.post(odin.SERVLET_PATH,
             $.extend(via.getQueryParams(), {
                 action: 'processmanager.getLog',
-                reportId: odinFormBuilder.reportId
+                reportId: odinFormBuilder.reportId,
+                processKey: odinFormBuilder.jobName
             }),
             function(data){
                 if(!via.undef(data,true) && data.success !== false && !via.undef(data.log,true)) {
@@ -2610,296 +2794,6 @@ var odinFormBuilder = {
                 }
             },
             'json');
-    },
-
-    /**
-     * createDashboardReport
-     * This will create a dashboard report from json provided
-     */
-    createDashboardReport: function(data,layoutJson){
-        //Current Tab
-        var currentTab = null;
-
-        //Get the layout json for this table
-        if(via.undef(data.chartData,true)){//Error check for data
-            via.alert("Layout Error","Could not find layout json in dataset.");
-            $('#smallLoadingMessage').hide();
-            return;
-        }
-
-        //Check for tabs
-        if(via.undef(layoutJson.tabs) || layoutJson.tabs.length === 0){
-            via.alert("Layout Error","Could not find any tabs in layout data.");
-            $('#smallLoadingMessage').hide();
-            return;
-        }
-
-        var tabIdMap = {};
-        var tabColMap = {};
-        //Check whether to draw the tabs
-        if(layoutJson.tabs.length === 1 && via.undef(layoutJson.tabs[0].displayName)){//don't draw the tabs
-            tabIdMap[0] = "tab_"+via.randomString();
-        }else {//Draw the tabs
-            //Draw the tab ul
-            var tabHtml = '<ul class="nav nav-tabs nav-justified" style="margin-top:5px;" role="tablist">';
-            for (var i = 0; i < layoutJson.tabs.length; i++) {
-                tabIdMap[i] = "tab_"+via.randomString();
-                var tabName = layoutJson.tabs[i].displayName;
-                if (via.undef(tabName, true)) {
-                    tabName = "Tab " + (i + 1);
-                }
-                var style = "";
-                if(layoutJson.tabs.length <= 1){
-                    style = "style=\"display:none;\"";
-                }
-
-                tabHtml += '<li role="presentation" '+style+' class="' + ((i === 0) ? "active" : "") + '"><a href="#' + tabIdMap[i] + '" aria-controls="' + tabIdMap[i] + '" role="tab" data-toggle="tab">' + tabName + '</a></li>';
-            }
-            tabHtml += "</ul>";
-
-        }
-
-        //Loop through the tabs and make their panels.
-        tabHtml += '<div class="tab-content">';
-        for (var i = 0; i < layoutJson.tabs.length; i++) {
-            var rows = layoutJson.tabs[i].rows;
-            var id = tabIdMap[i];
-            //Check for empty rows error
-            if(via.undef(rows,true)){
-                via.alert("Layout Error","Could not find any rows in layout data.");
-                $('#smallLoadingMessage').hide();
-                return;
-            }
-            //Make the tab panel
-            tabHtml += drawPanel( i, tabIdMap[i], rows, tabColMap );
-        }
-        tabHtml += '</div>';
-
-        //Hide the loading message and write the html
-        $('#resultsPanel').append(tabHtml);
-        $('#smallLoadingMessage').hide();
-
-
-        //Tab event. Draw on activate
-        $('a[data-toggle="tab"]').on('shown.bs.tab', function (e) {
-            var target = $(e.target).attr("href") // activated tab
-            var colIdMap = tabColMap[target];
-            currentTab = target;
-            drawAllColumns(colIdMap);
-        });
-
-        //Draw the initial Widgets for the first tab
-        var firstTabId = "#"+tabIdMap[0];
-        var colIdMap = tabColMap[firstTabId];
-        currentTab = firstTabId;
-        drawAllColumns(colIdMap);
-
-        //For a window Resize event
-        $( window ).resize(function() {
-            var colIdMap = tabColMap[currentTab];
-            drawAllColumns(colIdMap);
-        });
-
-        /*** Functions ***/
-        //Draw panel function draws the actual tab div panels
-        function drawPanel(index,id,panelJson , tabColMap){
-            var colIdMap = {};
-            //console.log('panelJson',panelJson,index,id);
-
-            //Main Panel
-            var panelHtml = '<div class="container-fluid tab-pane ' + ((i === 0) ? "active" : "") + '" id="'+id+'">';
-
-            //Loop Through Rows
-            for (var r = 0; r < panelJson.length; r++) {
-                var row = panelJson[r];
-                panelHtml += '<div class="row">';
-                //Check empty columns
-                if(via.undef(row.columns,true)){
-                    via.alert("Layout Error","Could not find any columns in row layout data.");
-                    $('#smallLoadingMessage').hide();
-                    return;
-                }
-
-                //Get the column widths
-                var totalStaticWidth = 0;
-                var columns = 0;
-                for (var c = 0; c < row.columns.length; c++) {
-                    var columnJson = row.columns[c];
-                    if(!via.undef(columnJson.width,true)) {
-                        totalStaticWidth += columnJson.width
-                    }else{
-                        columns++;
-                    }
-                }
-
-                //Loop through columns
-                var colWidth = Math.round((12-totalStaticWidth)/columns);
-                for (var c = 0; c < row.columns.length; c++) {
-                    var columnJson = row.columns[c];
-                    columnJson.height = row.height;
-                    columnJson.num = r;
-                    //panelHtml += drawColumn(columnJson,colWidth);
-                    var colId = "col_"+via.randomString();
-                    var currColWidth = colWidth;
-                    if(!via.undef(columnJson.width,true)) {
-                        currColWidth = columnJson.width;
-                    }
-                    panelHtml += '<div id="'+colId+'" class="col-md-'+currColWidth+'"></div>';
-                    colIdMap[colId] = columnJson;
-                }
-
-                //close out the div - row
-                panelHtml += "</div>";
-            }
-
-            //Assign the tab id and its column
-            tabColMap["#"+id] = colIdMap;
-
-            //Write and close out the div
-            panelHtml += "</div>";
-            return panelHtml;
-        }
-
-        function drawAllColumns(colIdMap){
-            var rowNum = 0;
-            var totalStaticHeight = 0;
-            var rowsTmp = {};
-            //Find row num and static height
-            $.each(colIdMap,function(id,json){
-                if(!rowsTmp.hasOwnProperty(json.num)){
-                    rowsTmp[json.num] = json.num;
-                    //Static height
-                    if(!via.undef(json.height,true)){
-                        totalStaticHeight+=parseInt(json.height);
-                    }
-                    //Row num
-                    if(via.undef(json.height)) {//Dont increase if using static height
-                        rowNum++;
-                    }
-                }
-            });
-
-            //Get row height
-            var headerPanels = 150 + totalStaticHeight;
-            var minHeight = 100;
-            var rowHeight = $(window).height();
-            rowHeight = rowHeight/rowNum;//Divide by number of rows
-            rowHeight = rowHeight - (headerPanels/rowNum);//minus the headers
-            if(rowHeight < minHeight){ rowHeight = minHeight; }
-
-            $('#resultsPanel').css({'min-height' : ($(window).height()-80)+"px", 'height' : ($(window).height()-80)+"px"});
-
-
-            $.each(colIdMap,function(id,json){
-                if(!via.undef(json.height,true)){
-                    $("#" + id).css("height", parseInt(json.height));
-                }else {
-                    $("#" + id).css("height", rowHeight);
-                }
-                drawColumn(id,json);
-            });
-        }
-
-        //Draws the column or the actual widget
-        function drawColumn(colId,columnJson){
-            var type = columnJson.type;
-            //Check empty type
-            if(via.undef(type,true)){
-                via.alert("Layout Error","Could not find the type of the column in row layout data.");
-                $('#smallLoadingMessage').hide();
-                return "";
-            }
-
-            switch(type){
-                case "html":
-                    if(via.undef(columnJson.html,true)){break;}
-                    var html = ""+columnJson.html;
-
-                    if(!via.undef(data.dataset.scalars)) {
-                        $.each(data.dataset.scalars,function(key,value){
-                            html = html.replace("["+key+"]",value);
-                        });
-                    }
-                    $('#'+colId).html(html);
-                    break;
-                case "table":
-                    var tableLabel = null;
-                    var tableIdx = 0;
-                    if(via.undef(columnJson.tableLabel)){
-                        tableLabel = data.dataset.tableLabels[0];
-                    }else{
-                        tableLabel = columnJson.tableLabel;
-                        tableIdx = $.inArray(tableLabel,data.dataset.tableLabels);
-                    }
-                    if($("#table_"+colId).length){ break; }
-                    if(!via.undef(data.treeMap[tableLabel])){
-                        $('#'+colId)
-                        .css("overflow","scroll")
-                        .css("margin-top","2px");
-                        odinTable.createTreeTable("table_"+colId,JSON.parse(JSON.stringify(data.treeMap[tableLabel])), '#'+colId,data.tableFormatting);
-                    }else {
-                        odinTable.createTable("table_"+colId, data.dataset.tablesets[tableIdx], '#'+colId,data.tableFormatting);
-                    }
-                    break;
-                default://Must be a chart
-                    //Draw the chart widget
-                    var overrideMargin = {top: 2, right: 2, bottom: 2, left: 2};
-                    if(type === 'bar'){
-                        overrideMargin.bottom = 25;
-                        overrideMargin.left = 35;
-                        overrideMargin.right = 35;
-                    }
-
-                    //Get chartData
-                    var tableLabel = null;
-                    if(via.undef(columnJson.tableLabel)){
-                        tableLabel = data.dataset.tableLabels[0];
-                    }else{
-                        tableLabel = columnJson.tableLabel;
-                    }
-                    var chartData = data.chartData[tableLabel];
-
-                    //Get the column values
-                    var textColumn = getColumnValue(columnJson.textCol,chartData);
-                    var sizeColumn = getColumnValue(columnJson.sizeCol,chartData);
-                    var colorColumn = getColumnValue(columnJson.colorCol,chartData);
-                    var xColumn = getColumnValue(columnJson.xCol,chartData);
-                    var yColumn = getColumnValue(columnJson.yCol,chartData);
-                    //console.log('textColumn',columnJson.textCol,textColumn);
-                    //console.log('sizeColumn',sizeColumn);
-                    //console.log('colorColumn',colorColumn);
-                    //console.log('xColumn',xColumn);
-                    //console.log('yColumn',yColumn);
-                    odinCharts.getChart("#"+colId,type, textColumn, sizeColumn,
-                        colorColumn,xColumn,yColumn,
-                        chartData,overrideMargin);
-            }
-
-
-            if(!via.undef(columnJson.style,true)){
-                var styles = columnJson.style.split(";");
-                for(var i in styles){
-                    var style = styles[i];
-                    if(style.length>0 && style.indexOf(":")!==-1){
-                        var [styleName,styleValue] = style.split(":");
-                        $('#'+colId).css(styleName,styleValue);
-                    }
-                }
-            }
-        }
-
-        function getColumnValue(colVal,chartData){
-            var columnName = null;
-            if(via.undef(colVal)){
-                columnName = chartData.columnHeaders[0];
-            }else if($.inArray(colVal,chartData.columnHeaders)!==-1){
-                columnName = colVal;
-            }else if(!isNaN(parseInt(colVal))){
-                var idx = parseInt(colVal);
-                columnName = chartData.columnHeaders[idx];
-            }
-            return columnName;
-        }
     },
 
     createOutputReport: function(json){
@@ -2914,8 +2808,11 @@ var odinFormBuilder = {
                 break;
             case odinFormBuilder.OUTPUT_TYPE_DATA_WINDOW:
                 //Put in a wait message
-                $('#smallLoadingMessage').show();
+                if(!odinFormBuilder.hideNav) {
+                    $('#smallLoadingMessage').show();
+                }
                 //kendo.ui.progress($("#smallLoadingMessage"), true);
+
 
                 /**Call to the server to get the DataSet**/
                 $.post(odin.SERVLET_PATH,
@@ -2924,7 +2821,10 @@ var odinFormBuilder = {
                         reportId: odinFormBuilder.reportId,
                         processKey: odinFormBuilder.jobName,
                         debug: via.isDebug(),
-                        isKendo: true
+                        isKendo: true,
+                        stringIterVariables: via.undef(json.dynamicStringVariables)?null:JSON.stringify(json.dynamicStringVariables),
+                        stringIterValues: via.undef(json.stringIteratorSettingList)?null:JSON.stringify(json.stringIteratorSettingList),
+                        savedDashboardReport: via.getParamsValue("savedDashboardReport")
                     })).done(function(data){
                         $('.poweredPanel').hide();
                         data = JSON.parse(data.replace(/\bNaN\b/g, "null"));
@@ -2951,8 +2851,8 @@ var odinFormBuilder = {
                             }
                             //To make the combobox for select.
                             if(data.dataset.tablesets.length > 1){
-                                var html = "Select Report: \n" +
-                                    '<select id="select_'+odinFormBuilder.reportId+'">';
+                                var html = "<span style='display:none;margin-left:5px;' class='tablesetSelector'>Select Report: \n" +
+                                    '<select id="select_'+odinFormBuilder.reportId+'"></span>';
                                 data.dataset.tableLabels.forEach(function(e,i){
                                     var label = e;
                                     if(via.undef(e,true)){
@@ -2972,31 +2872,75 @@ var odinFormBuilder = {
                                     }
 
                                     var idx = $('#select_'+odinFormBuilder.reportId).val();
-                                    $('#smallLoadingMessage').show();
+                                    if(!odinFormBuilder.hideNav){
+                                        $('#smallLoadingMessage').show();
+                                    }
                                     //$('#loadingContainer').html('<span class="label label-info"><i class="fa fa-spinner fa-pulse fa-fw"></i> Loading...</span>');
                                     $('#dwContainer').empty();
                                     setTimeout(function(){
                                         $('#dwContainer').empty();
                                         $('#treeExpandContainer').empty();
                                         var tableLabel = data.dataset.tablesets[idx].tableLabel;
+                                        //Add hyperlink formatting
+                                        if(!via.undef(odinFormBuilder.currentData) && !via.undef(odinFormBuilder.currentData.dataset)
+                                            && !via.undef(odinFormBuilder.currentData.dataset.scalars) && !via.undef(odinFormBuilder.currentData.dataset.scalars.convertColumnListMap)){
+                                            data.tableFormatting.convertColumnListMap = JSON.parse(odinFormBuilder.currentData.dataset.scalars.convertColumnListMap);
+                                            data.tableFormatting.convertColumnDataTypeMap = JSON.parse(odinFormBuilder.currentData.dataset.scalars.convertColumnDataTypeMap);
+                                        }
                                         if(!via.undef(data.treeMap[tableLabel])){
-                                            odinTable.createTreeTable('table_' + odinFormBuilder.reportId, JSON.parse(JSON.stringify(data.treeMap[tableLabel])), '#dwContainer',data.tableFormatting);
+                                            var grid = odinTable.createTreeTable('table_' + odinFormBuilder.reportId, JSON.parse(JSON.stringify(data.treeMap[tableLabel])), '#dwContainer',data.tableFormatting);
+                                            grid.bind("sort", function(e) {
+                                                setTimeout(function () {
+                                                    /** Intercept hyperlink clicks **/
+                                                    $("#table_" + odinFormBuilder.reportId).find('tbody').find('a').click(function () {
+                                                        event.preventDefault();
+                                                        via.showHyperLinkInWindow($(this).attr('href'));
+                                                    });
+                                                }, 100);
+                                            });
                                         }else {
-                                            odinTable.createTable('table_' + odinFormBuilder.reportId, data.dataset.tablesets[idx], '#dwContainer',data.tableFormatting);
+                                            var offsetHeight = 115;
+                                            if(odinFormBuilder.hideNav){
+                                                offsetHeight = 40;
+                                            }
+                                            var grid = odinTable.createTable('table_' + odinFormBuilder.reportId, data.dataset.tablesets[idx], '#dwContainer',data.tableFormatting,$('body').height()-offsetHeight + "px");
+                                            grid.bind("sort", function(e) {
+                                                setTimeout(function () {
+                                                    /** Intercept hyperlink clicks **/
+                                                    $("#table_" + odinFormBuilder.reportId).find('tbody').find('a').click(function () {
+                                                        event.preventDefault();
+                                                        via.showHyperLinkInWindow($(this).attr('href'));
+                                                    });
+                                                }, 100);
+                                            });
+                                            if(via.getParamsValue('hidegrouping')==="true") {
+                                                grid.setOptions({
+                                                    groupable: false
+                                                });
+                                            }
                                         }
                                         $('#smallLoadingMessage').hide();
-                                        //kendo.ui.progress($("#smallLoadingMessage"), false);
+
+                                        /** Intercept hyperlink clicks **/
+                                        $("#table_" + odinFormBuilder.reportId).find('tbody').find('a').click(function () {
+                                            event.preventDefault();
+                                            via.showHyperLinkInWindow($(this).attr('href'));
+                                        });
+
                                     },25);
                                 });
                             }
-                            $('#resultsPanel').append(' <a title="Export to Excel"  id="exportButton_' + odinFormBuilder.reportId+'" class="tr btn btn-sm btn-success" href="#"><i class="fa fa-file-excel-o"></i></a>' +
-                                '<span id="saveIconContainer"></span>' +
-                                '<span id="webServiceIconContainer"></span>' +
-                                '<span id="chartIconContainer"></span>' +
-                                '<span id="treeExpandContainer"></span>' +
+                            $('#resultsPanel').append(' <a style="display:none;margin-left:5px;" title="Export to Excel"  id="exportButton_' + odinFormBuilder.reportId+'" class="hideNav tr btn btn-sm btn-success" href="#"><i class="fa fa-file-excel-o"></i></a>' +
+                                '<span class="hideNav" id="saveIconContainer"></span>' +
+                                '<span class="hideNav" id="webServiceIconContainer"></span>' +
+                                '<span class="hideNav" id="chartIconContainer"></span>' +
+                                '<span class="hideNav" id="treeExpandContainer"></span>' +
                                 '<br>' +
-                                '<span id="dwContainer"></span>');
-                            //For Saving and Loading
+                                '<div id="dwContainer"></div>');
+                            odinFormBuilder.hideNavButtons();
+
+                            //For Saving and Loading and dashboard
+                            odinFormBuilder.saveId = -1;
                             if(!via.undef(data.saveId) && data.saveId !== -1){
                                 //Uncomment to turn save and load on...
                                 //$('#saveIconContainer').append(' | <span><a title="Load Saved Settings"  id="loadButton_' + odinFormBuilder.reportId+'" class="tr btn btn-sm btn-primary" href="#"><i class="fa fa-folder-open-o"></i></a></span>' +
@@ -3004,6 +2948,7 @@ var odinFormBuilder = {
 
                                 var appId = odin.PROCESS_MANAGER_APP_ID;//Process Manager App Id
                                 var saveId = data.saveId;
+                                odinFormBuilder.saveId = saveId;
                                 $("#loadButton_" + odinFormBuilder.reportId).click(function(){
                                     via.loadWindow(appId,saveId,function(loadJson){
                                         //Callback function for Load
@@ -3016,6 +2961,11 @@ var odinFormBuilder = {
                                     via.saveWindow(appId,saveId,saveJson,function(reportName){
                                     });
                                 });
+
+                                //Show the dashboard buttons. Needs to have a save id.
+                                if((!via.undef(data.isChartingEnabled) && data.isChartingEnabled===true) || (!via.undef(data.dashboardJson))) {
+                                    odinFormBuilder.initDashboardButtons(saveId);
+                                }
                             }
                             //For Charting
                             if(!via.undef(data.isChartingEnabled) && data.isChartingEnabled===true){
@@ -3033,8 +2983,8 @@ var odinFormBuilder = {
                             }
                             //For Web Service
                             var enableWebServices = odin.getUserSpecificSetting("enableWebServices");
-                            if(!via.undef(enableWebServices,true) && enableWebServices === "true" && !via.undef(json.hasWebServiceTemplate) && json.hasWebServiceTemplate === true) {
-                                $('#webServiceIconContainer').append('<span><a style="margin-left:10px;" title="Download Web Service Excel File"  id="webServiceButton_' + odinFormBuilder.reportId + '" class="tr btn btn-sm btn-warning pull-right" href="#"><i class="fa fa-cog"></i></a></span>');
+                            if(odinFormBuilder.hideNav===false && !via.undef(enableWebServices,true) && enableWebServices === "true" && !via.undef(json.hasWebServiceTemplate) && json.hasWebServiceTemplate === true) {
+                                $('#webServiceIconContainer').append('<span><a style="margin-left:10px;margin-right:5px;" title="Download Web Service Excel File"  id="webServiceButton_' + odinFormBuilder.reportId + '" class="tr btn btn-sm btn-warning pull-right" href="#"><i class="fa fa-cog"></i></a></span>');
                                 $("#webServiceButton_" + odinFormBuilder.reportId).click(function () {
                                     odinFormBuilder.downloadWebServiceFile();
                                 });
@@ -3045,42 +2995,168 @@ var odinFormBuilder = {
 
                             //Export event
                             $('#exportButton_' + odinFormBuilder.reportId).click(function(){
-                                kendo.ui.progress($("#treeExpandContainer"), true);
-                                setTimeout(function(){
-                                    kendo.ui.progress($("#treeExpandContainer"),false);
-                                },1000);
+                                if(!via.undef(odinFormBuilder.currentData) && !via.undef(odinFormBuilder.currentData.dataset) &&
+                                    !via.undef(odinFormBuilder.currentData.dataset.tableLabels) &&
+                                    odinFormBuilder.currentData.dataset.tableLabels.length > 1) {//More than one tableset
 
-                                var idx = $('#select_'+odinFormBuilder.reportId).val();
-                                if(via.undef(idx)){
-                                    idx = 0;
+                                    $("body").append("<div id='tableSelectDialog'></div>");
+                                    $("#tableSelectDialog").kendoDialog({
+                                        width: "400px",
+                                        visible: true,
+                                        title: "Select Tables to Export",
+                                        closable: true,
+                                        modal: false,
+                                        content: `<div class=''>
+                                                    <input id='selectedTables'/>
+                                                  </div>`,
+                                        actions: [
+                                            { text: 'Cancel'},
+                                            { text: 'OK', primary: true, action: function(){
+                                                var multiSelect = $('#selectedTables').data('kendoMultiSelect');
+                                                var tables = multiSelect.value();
+
+                                                $("#tableSelectDialog").remove();
+
+                                                var url = odin.SERVLET_PATH + "?action=processmanager.getDataWindowFile&reportId=" + odinFormBuilder.reportId +
+                                                    "&processKey=" + odinFormBuilder.jobName + "&reportType=xls&multiIdx=" + JSON.stringify(tables) + "&overrideUser=" + (via.undef(odinFormBuilder.odinLite_overrideUser, true) ? "" : odinFormBuilder.odinLite_overrideUser);
+                                                window.location = url;
+                                            }}
+                                        ],
+                                        close: function(){
+                                            $("#tableSelectDialog").remove();
+                                        },
+                                        open: function(){
+                                            var ds = [];
+                                            var allIdx = [];
+                                            for(var i=0;i<odinFormBuilder.currentData.dataset.tableLabels.length;i++){
+                                                ds.push({
+                                                    text: odinFormBuilder.currentData.dataset.tableLabels[i],
+                                                    value: i
+                                                });
+                                                allIdx.push(i);
+                                            }
+
+                                            $('#selectedTables').kendoMultiSelect({
+                                                dataSource: ds,
+                                                dataTextField: "text",
+                                                dataValueField: "value",
+                                            });
+
+                                            var multiSelect = $('#selectedTables').data('kendoMultiSelect');
+                                            multiSelect.value(allIdx);
+                                        }
+                                    });
+                                }else{//Only one tableset.
+                                    kendo.ui.progress($("#treeExpandContainer"), true);
+                                    setTimeout(function(){
+                                        kendo.ui.progress($("#treeExpandContainer"),false);
+                                    },1000);
+
+                                    var idx = $('#select_' + odinFormBuilder.reportId).val();
+                                    if (via.undef(idx)) {
+                                        idx = 0;
+                                    }
+                                    var url = odin.SERVLET_PATH + "?action=processmanager.getDataWindowFile&reportId=" + odinFormBuilder.reportId +
+                                        "&processKey=" + odinFormBuilder.jobName + "&reportType=xls&idx=" + idx + "&overrideUser=" + (via.undef(odinFormBuilder.odinLite_overrideUser, true) ? "" : odinFormBuilder.odinLite_overrideUser);
+                                    window.location = url;
                                 }
-                                var url = odin.SERVLET_PATH + "?action=processmanager.getDataWindowFile&reportId=" + odinFormBuilder.reportId +
-                                    "&processKey=" + odinFormBuilder.jobName + "&reportType=xls&idx=" + idx + "&overrideUser=" + (via.undef(odinFormBuilder.odinLite_overrideUser,true)?"":odinFormBuilder.odinLite_overrideUser);
-                                window.location = url;
                             });
 
                             //Make the trees
                             setTimeout(function(){
                                 var tableLabel = data.dataset.tablesets[0].tableLabel;
-
-                                if(!via.undef(data.dashboardJson)) {
+                                //Add hyperlink formatting
+                                if(!via.undef(odinFormBuilder.currentData) && !via.undef(odinFormBuilder.currentData.dataset)
+                                    && !via.undef(odinFormBuilder.currentData.dataset.scalars) && !via.undef(odinFormBuilder.currentData.dataset.scalars.convertColumnListMap)){
+                                    data.tableFormatting.convertColumnListMap = JSON.parse(odinFormBuilder.currentData.dataset.scalars.convertColumnListMap);
+                                    data.tableFormatting.convertColumnDataTypeMap = JSON.parse(odinFormBuilder.currentData.dataset.scalars.convertColumnDataTypeMap);
+                                }
+                                var overrideLayout = via.getParamsValue("overridelayout");
+                                if(!via.undef(data.dashboardJson) || !via.undef(overrideLayout)) {
                                     try {
                                         var dashboardJson = JSON.parse(data.dashboardJson);
-                                        odinFormBuilder.createDashboardReport(data,dashboardJson);
+                                        var dashboardData = JSON.parse(JSON.stringify(data));
+                                        if(!via.undef(overrideLayout)){
+                                            dashboardJson = JSON.parse(decodeURIComponent(overrideLayout));
+                                        }
+
+                                        //Add the iterators:
+                                        if(!via.undef(odinFormBuilder.currentDynamicStringVariables)) {
+                                            dashboardData.iterators = {
+                                                variables: odinFormBuilder.currentDynamicStringVariables,
+                                                values: odinFormBuilder.currentStringIteratorSettingList
+                                            };
+                                        }
+
+                                        odinDashboard.createDashboardReport(dashboardData,dashboardJson);
                                     }catch(e){
                                         console.log("JSON Parse Error",e)
                                     }
                                 }else if(!via.undef(data.treeMap[tableLabel])){
-                                    odinTable.createTreeTable('table_' + odinFormBuilder.reportId,JSON.parse(JSON.stringify(data.treeMap[tableLabel])), '#dwContainer',data.tableFormatting);
+                                    $('.tablesetSelector').show();
+                                    $('#resultsPanel').css('margin',"5px");
+                                    var grid = odinTable.createTreeTable('table_' + odinFormBuilder.reportId,JSON.parse(JSON.stringify(data.treeMap[tableLabel])), '#dwContainer',data.tableFormatting);
+                                    grid.bind("sort", function(e) {
+                                        setTimeout(function(){
+                                            /** Intercept hyperlink clicks **/
+                                            $("#table_" + odinFormBuilder.reportId).find('tbody').find('a').click(function () {
+                                                event.preventDefault();
+                                                via.showHyperLinkInWindow($(this).attr('href'));
+                                            });
+                                        },100);
+                                    });
+                                    $('#exportButton_' + odinFormBuilder.reportId).show();
                                 }else {
-                                    odinTable.createTable('table_' + odinFormBuilder.reportId, data.dataset.tablesets[0], '#dwContainer',data.tableFormatting);
+                                    $('.tablesetSelector').show();
+                                    //$('#resultsPanel').css('margin',"5px");
+                                    var offsetHeight = 120;
+                                    if(odinFormBuilder.hideNav){
+                                        offsetHeight = 40;
+                                    }
+                                    var grid = odinTable.createTable('table_' + odinFormBuilder.reportId, data.dataset.tablesets[0], '#dwContainer',data.tableFormatting,$('body').height()-offsetHeight + "px");
+                                    grid.bind("sort", function(e) {
+                                        setTimeout(function(){
+                                            /** Intercept hyperlink clicks **/
+                                            $("#table_" + odinFormBuilder.reportId).find('tbody').find('a').click(function () {
+                                                event.preventDefault();
+                                                via.showHyperLinkInWindow($(this).attr('href'));
+                                            });
+                                        },100);
+                                    });
+                                    if(via.getParamsValue('hidegrouping')==="true") {
+                                        grid.setOptions({
+                                            groupable: false
+                                        });
+                                    }
+                                    $('#exportButton_' + odinFormBuilder.reportId).show();
                                 }
                                 $('#smallLoadingMessage').hide();
                                 //kendo.ui.progress($("#smallLoadingMessage"), false);
 
+                                /** Intercept hyperlink clicks **/
+                                $("#table_" + odinFormBuilder.reportId).find('tbody').find('a').click(function(){
+                                    event.preventDefault();
+                                    via.showHyperLinkInWindow($(this).attr('href'));
+                                });
+
+
+
+                                //Make into an image:
+                                if(odinFormBuilder.printMode){
+                                    setTimeout(function(){
+                                        html2canvas(document.querySelector("#resultsPanel"),{}).then(canvas => {
+                                            $('#resultsPanel').hide();
+                                            document.body.appendChild(canvas);
+
+                                            var printDialog = via.getParamsValue("printdialog");
+                                            if(!via.undef(printDialog) && printDialog.toLowerCase() === "true") {
+                                                window.print();
+                                            }
+                                        });
+                                    },250);
+                                }
 
                             },250);
-
 
                             //Perform translation if needed.
                             odin.performTranslation('#resultsPanel');
@@ -3093,34 +3169,38 @@ var odinFormBuilder = {
                 if(!via.undef(json.isFileEmpty) && json.isFileEmpty === true){
                     $('#resultsPanel').html(
                         '<div class="row">' +
-                        '<div class="col-sm-12">' +
+                        '<div class="col-sm-12" style="margin-top:10px;overflow:hidden;">' +
                         '<div class="text-center">' +
                         '<span class="tr">Error generating file. See Log file for details.</span>' +
-                        '<br/><a class="tr" href="javascript:window.location=\'' + url + '\'">Download File</a>' +
+                        '<br/><a class="tr" href="#" onclick="window.location=\'' + url + '\'">Download File</a>' +
                         '</div>' +
                         '</div>' +
                         '</div>');
                 }else {
                     $('#resultsPanel').html(
                         '<div class="row">' +
-                        '<div class="col-sm-12">' +
+                        '<div class="col-sm-12" style="margin-top:10px;overflow:hidden;">' +
                         '<div class="text-center">' +
-                        '<a class="tr" href="javascript:window.location=\'' + url + '\'">Download File</a>' +
+                        '<a class="tr fileDownloadButton" href="#" onclick="window.location=\'' + url + '\'">Download File</a>' +
                         '</div>' +
                         '</div>' +
                         '</div>');
+                    //For auto download feature
+                    if(via.getParamsValue("autodownload",true).toLowerCase() === "true"){
+                        $('.fileDownloadButton').trigger('click');
+                    }
                 }
 
                 //For Web Service
                 var enableWebServices = odin.getUserSpecificSetting("enableWebServices");
-                if(!via.undef(enableWebServices,true) && enableWebServices === "true" && !via.undef(json.hasWebServiceTemplate) && json.hasWebServiceTemplate === true) {
+                if(odinFormBuilder.hideNav===false && !via.undef(enableWebServices,true) && enableWebServices === "true" && !via.undef(json.hasWebServiceTemplate) && json.hasWebServiceTemplate === true) {
                     $('#resultsPanel').append('<span><a style="margin-left:10px;" title="Download Web Service Excel File"  id="webServiceButton_' + odinFormBuilder.reportId + '" class="tr btn btn-sm btn-warning pull-right" href="#"><i class="fa fa-cog"></i></a></span>');
                     $("#webServiceButton_" + odinFormBuilder.reportId).click(function () {
                         odinFormBuilder.downloadWebServiceFile();
                     });
                 }
 
-                //$('#resultsPanel').html('<a class="tr" href="javascript:window.location=\''+url+'\'">Download File</a>');
+                //$('#resultsPanel').html('<a class="tr" href="#" onclick="window.location=\''+url+'\'">Download File</a>');
                 //via.downloadFile(url);
 
                 //Perform translation if needed.
@@ -3158,10 +3238,78 @@ var odinFormBuilder = {
                     iframedoc.close();
                 },50);
                 break;
+            case odinFormBuilder.OUTPUT_TYPE_FILE_MANAGER:
+                if(!via.undef(json.configSettings) && !via.undef(json.configSettings.reportId)) {
+                    window.location = '../fileManager/?downloadid=' + json.configSettings.reportId;
+                }else{
+                    via.kendoAlert("File Manager Error","Cannot find download id in response.");
+                }
+                break;
+            case odinFormBuilder.OUTPUT_TYPE_DATA_MANAGER:
+                //DATA_MANAGER.QUERY_START_DATE: "20110502"
+                //VIA.DOWNLOAD_MODULE: "SKIP"
+                //VIA.UPLOAD_MODULE: "SKIP"
+                //DATA_MANAGER.REPORT_IDENTIFIER: "ACCOUNT_VALUE"
+                //DATA_MANAGER.QUERY_ENTITY_IDENTIFIER: ""
+                //DATA_MANAGER.QUERY_STRING: "Client XYZ 10"
+                //DATA_MANAGER.QUERY_END_DATE: "20180105"
+                ///dataManager/index.html?reportname=ACCOUNT_VALUE&startdate=20110502&enddate=20180105&entity=Client%20XYZ%2010
+                var queryString = "";
+                if(via.undef(json.configSettings)){
+                    via.kendoAlert("Data Manager Error","Cannot find settings in response.");
+                    break;
+                }
+
+                //Job Name
+                var jobName = json.configSettings['DATA_MANAGER.REPORT_IDENTIFIER']
+                if(!via.undef(jobName,true)) {
+                    queryString = "reportname=" + updateDataManagerVariable(json,jobName);
+                }else{
+                    via.kendoAlert("Data Manager Error","Cannot find report name in response.");
+                    break;
+                }
+
+                //Entity Name
+                var entity = json.configSettings['DATA_MANAGER.QUERY_ENTITY_IDENTIFIER']
+                if(!via.undef(entity,true)) {
+                    queryString += "&entity=" + updateDataManagerVariable(json,entity);
+                }
+
+                //Job Name
+                var startDate = json.configSettings['DATA_MANAGER.QUERY_START_DATE']
+                if(!via.undef(startDate,true)) {
+                    queryString += "&startdate=" + updateDataManagerVariable(json,startDate);
+                }
+
+                //Job Name
+                var endDate = json.configSettings['DATA_MANAGER.QUERY_END_DATE']
+                if(!via.undef(endDate,true)) {
+                    queryString += "&enddate=" + updateDataManagerVariable(json,endDate);
+                }
+
+                //String val
+                var stringVal = json.configSettings['DATA_MANAGER.QUERY_STRING']
+                if(!via.undef(stringVal,true)) {
+                    queryString += "&stringval=" + updateDataManagerVariable(json,stringVal);
+                }
+
+                window.location = '../dataManager/?' + queryString;
+
+                break;
         }
 
 
         $('#resultsPanel').fadeIn();
+
+
+        /** Functions **/
+        function updateDataManagerVariable(json, settingValue){
+            if(via.undef(json.dynamicStringVariables) || via.undef(json.stringIteratorSettingList)){ return settingValue; }
+
+            var idx = $.inArray(settingValue,json.dynamicStringVariables);
+            if(idx === -1){ return settingValue; }
+            return json.stringIteratorSettingList[idx];
+        }
     },
 
     /**
@@ -3241,6 +3389,7 @@ var odinFormBuilder = {
         $('#mainPanel').hide();
         $('#formBuilder_resultButtons').hide();
         $(".adminControls").hide();
+        odinFormBuilder.hideDashboardButtons();
 
         $('#accountSettings').fadeIn();
 
@@ -3258,6 +3407,63 @@ var odinFormBuilder = {
         });
     },
 
+    /**
+     * This will hide any elements with hideNav class.
+     * Only if the param is set to true.
+     */
+    hideNavButtons: function(){
+        if(odinFormBuilder.hideNav){
+            $('.hideNav').hide();
+            $('#mainPanel').css("padding-top","5px");
+        }
+    },
+
+    /**
+     * setupPrintMode
+     * This will enable print mode
+     */
+    setupPrintMode: function() {
+        odinFormBuilder.printMode = (via.getParamsValue('printmode') === "true");
+        if (!odinFormBuilder.printMode) {
+            return;
+        }
+
+        var tmpPaperType = via.getParamsValue('papertype');
+        if (!via.undef('tmpPaperType') && via.undef(odinFormBuilder.paperTypes[tmpPaperType])) {//If the paper tpe is not defined.
+            tmpPaperType = "Letter";
+        }
+        var paperName = !via.undef(tmpPaperType) ? tmpPaperType : "Letter";
+        var orientation = via.getParamsValue('orientation');
+        var tabidx = via.getParamsValue('tabidx');
+        odinFormBuilder.paperObj = odinFormBuilder.paperTypes[paperName];
+        odinFormBuilder.paperObj.orientation = via.undef(orientation) ? "Landscape" : orientation;
+        odinFormBuilder.paperObj.tabIdx = via.undef(tabidx) ? 0 : tabidx;
+
+        //Setup the body:
+        if (odinFormBuilder.paperObj.orientation.toLowerCase() === "landscape") {
+            $('body').css("min-height", odinFormBuilder.paperObj.width);
+            $('body').css("min-width", odinFormBuilder.paperObj.height);
+            $('body').css("height", 0);
+            $('body').css("width", 0);
+        }else{
+            $('body').css("min-width", odinFormBuilder.paperObj.width);
+            $('body').css("min-height", odinFormBuilder.paperObj.height);
+            $('body').css("height", 0);
+            $('body').css("width", 0);
+        }
+        $('body').css("margin","0 auto");
+        $('body').css("padding","0");
+        $('body').css("overflow","auto");
+    },
+
+    /**
+     * getPaperObj
+     * This will return null if printmode is not enabled.
+     */
+    getPaperObj: function(){
+        return odinFormBuilder.paperObj;
+    },
+
     hideAccountSettings: function(){
         $('#accountSettings').hide();
     },
@@ -3265,4 +3471,268 @@ var odinFormBuilder = {
      * End Account Settings
      * ----------------------
      */
+
+    /**
+     * hideDashboardButtons
+     * hides the dashboard buttons
+     */
+    hideDashboardButtons: function(){
+        $('#formBuilder_dashboardButtons').hide();
+        odinEditDashboard.isPreviewMode = false;
+        odinEditDashboard.isEditMode = false;
+        $('#dasboardEditMode').hide();
+    },
+
+    /**
+     * initDashboardButtons
+     * Sets up the dashboard buttons
+     */
+    initDashboardButtons: function(saveId){
+        if(via.undef(saveId)){ return; }
+        if(odin.USER_INFO.userName !== 'rocco'){ return; }
+
+        //Show the buttons
+        $('#formBuilder_dashboardButtons').show();
+
+        //Setup the button events.
+        $('#formBuilder_dashboardButton_edit').off();
+        $('#formBuilder_dashboardButton_edit').click(function(){
+            var layoutJson = null;
+            if(!via.undef(odinFormBuilder.currentData.dashboardJson)) {
+                layoutJson = JSON.parse(odinFormBuilder.currentData.dashboardJson);
+            }else{
+                layoutJson = {
+                    "tabs": [
+                        {
+                            "displayName": "Tab 1",
+                            "rows": [
+                                {
+                                    "columns": [
+                                        {
+                                            "type": "table",
+                                            "fontSize": 12,
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                };
+            }
+            odinDashboard.createDashboardReport(odinFormBuilder.currentData,layoutJson,true);
+        });
+        $('#formBuilder_dashboardButton_load').off();
+        $('#formBuilder_dashboardButton_load').click(function(){
+            via.loadWindow(odin.PROCESS_MANAGER_APP_ID,saveId + odinFormBuilder.DASHBOARD_SAVE_SUFFIX,function(loadJson) {
+                if(via.undef(loadJson) || via.undef(loadJson.layoutJson)){
+                    via.kendoAlert("Dashboard Layout","No Layout currently defined in saved data.");
+                    return;
+                }
+
+                //Update the undo
+                odinEditDashboard.undoArr.push(odinFormBuilder.currentData.dashboardJson);
+
+                odinFormBuilder.currentData.dashboardJson = loadJson.layoutJson;
+
+                var layoutJson = JSON.parse(loadJson.layoutJson);
+
+                //Create the dashboard
+                odinDashboard.createDashboardReport(odinFormBuilder.currentData,layoutJson);
+                odinDashboard.layoutJson = layoutJson;
+
+                //Update redo
+                $(".redoButton").attr('disabled',true);
+                odinEditDashboard.redoArr = [];
+            });
+        });
+        $('#formBuilder_dashboardButton_save').off();
+        $('#formBuilder_dashboardButton_save').click(function(){
+            if(via.undef(odinDashboard.layoutJson,true)){
+                via.kendoAlert("Dashboard Layout","No Layout currently defined for dashboard.");
+                return;
+            }
+
+            var saveJson = {
+                layoutJson: JSON.stringify(odinDashboard.layoutJson)
+            };
+            via.saveWindow(odin.PROCESS_MANAGER_APP_ID,saveId + odinFormBuilder.DASHBOARD_SAVE_SUFFIX,JSON.stringify(saveJson),function(reportName){
+
+            },false);
+        });
+        //Printing
+        $('#formBuilder_dashboardButton_print').off();
+        $('#formBuilder_dashboardButton_print').click(function(){
+            odinFormBuilder.printLayoutWindow();
+        });
+
+    },
+
+    /**
+     * This will open the window for the print layout.
+     */
+    printLayoutWindow: function(overrideLayoutJson){
+
+        //Popup print layout window.
+        kendo.ui.progress($("body"), true);//Wait Message
+        $.get("../odinDashboard/html/printLayout.html", function (printLayoutWindowTemplate) {
+            kendo.ui.progress($("body"), false);//Wait Message
+
+            $('#editComponentWindow').remove();
+            $('body').append(printLayoutWindowTemplate);
+            //Make the window.
+            var printLayoutWindow = $('#printLayoutWindow').kendoWindow({
+                title: "Print Layout",
+                draggable: true,
+                resizable: true,
+                width: "550px",
+                height: "275px",
+                modal: true,
+                close: false,
+                scrollable: true,
+                actions: [
+                    "Maximize",
+                    "Close"
+                ],
+                close: function () {
+                    printLayoutWindow = null;
+                    $('#printLayoutWindow').remove();
+                }
+            }).data("kendoWindow");
+
+            printLayoutWindow.center();
+
+            //Tab Names
+            $(".printLayoutTabNameContainer").hide();
+            if(!via.undef(odinFormBuilder.currentData.dashboardJson,true)) {
+                var layoutJson = JSON.parse(odinFormBuilder.currentData.dashboardJson);
+                if(layoutJson.tabs.length > 1) {
+                    var tabNames = [];
+                    for(var i=0;i<layoutJson.tabs.length;i++){
+                        var name = (via.undef(layoutJson.tabs[i].displayName,true)?i:layoutJson.tabs[i].displayName);
+                        tabNames.push({text:name,value:i});
+                    }
+                    $("#printLayoutTabName").kendoDropDownList({
+                        dataTextField: "text",
+                        dataValueField: "value",
+                        index: 0,
+                        dataSource: tabNames
+                    });
+                    $(".printLayoutTabNameContainer").show();
+                }
+            }
+
+            //Paper Types
+            var paperTypes = [];
+            for (const key of Object.keys(odinFormBuilder.paperTypes)) {
+                paperTypes.push({text:key,value:key});
+            }
+            $("#printLayoutPaperSize").kendoDropDownList({
+                dataTextField: "text",
+                dataValueField: "value",
+                index: 0,
+                dataSource: paperTypes
+            });
+
+            //Paper Orientation
+            $("#printLayoutPaperOrientation").kendoDropDownList({
+                dataTextField: "text",
+                dataValueField: "value",
+                index: 0,
+                dataSource: [{text:'Portrait',value:'portrait'},
+                    {text:'Landscape',value:'landscape'}]
+            });
+
+            //Saved Reports
+            if(!via.undef(overrideLayoutJson,true)){
+                $('.printLayoutSavedReportsContainer').hide();
+            }else {
+                var hasSavedReports = false;
+                $.post(odin.SERVLET_PATH,
+                    {
+                        action: 'admin.getSavedReportList',
+                        appId: odin.PROCESS_MANAGER_APP_ID,
+                        saveId: odinFormBuilder.saveId + odinFormBuilder.DASHBOARD_SAVE_SUFFIX
+                    },
+                    function (data, status) {
+                        if (status === "success" && !via.undef(data) && data.success) {
+                            $('.printLayoutSavedReportsContainer').show();
+                            $('.updatePrintLayoutReport').click(function () {
+                                via.loadWindow(odin.PROCESS_MANAGER_APP_ID, odinFormBuilder.saveId + odinFormBuilder.DASHBOARD_SAVE_SUFFIX, function (loadJson, reportName, reportType) {
+                                    if (!via.undef(reportType) && reportType !== 'Personal') {
+                                        $('#printLayoutSavedReports').val("Common::" + reportName);
+                                    } else {
+                                        $('#printLayoutSavedReports').val(reportName);
+                                    }
+                                });
+                            });
+                        } else {
+                            hasSavedReports = false;
+                            $('.printLayoutSavedReportsContainer').hide();
+                        }
+                    },
+                    'json');
+            }
+
+            /** Events **/
+            //Apply Button
+            $('.printLayoutApply').click(function(){
+                var url = window.location + "";
+                //Remove trailing #
+                if(url.endsWith("#")){
+                    url = url.substring(0,url.length-1);
+                }
+                //Find the prefix
+                var prefix = "";
+                if(url.includes("?")){
+                    prefix = "&";
+                }else{
+                    prefix = "?";
+                }
+
+                //Add print stuff
+                //printDialog=true
+                url += prefix + "printMode=true&hideNav=true&disableMaximize=true&autorun=true";
+
+                var savedReport = $('#printLayoutSavedReports').val();
+                if(!via.undef(savedReport) && savedReport !== 'Default'){
+                    url += "&savedDashboardReport=" + savedReport;
+                }
+
+                //Tab Name
+                var tabidx = 0;
+                var tabDD = $("#printLayoutTabName").data('kendoDropDownList');
+                if(!via.undef(tabDD)){
+                    tabidx = tabDD.value();
+                }
+                url += "&tabIdx=" + tabidx;
+
+                //Orientation
+                var paperSizeVal = $("#printLayoutPaperSize").data('kendoDropDownList').value();
+                if(!via.undef(paperSizeVal)){
+                    url += "&papertype=" + paperSizeVal;
+                }
+
+                //Orientation
+                var orientationVal = $("#printLayoutPaperOrientation").data('kendoDropDownList').value();
+                if(!via.undef(orientationVal)){
+                    url += "&orientation=" + orientationVal;
+                }
+
+                //Override Layout Data
+                if(!via.undef(overrideLayoutJson)){
+                    url += "&overrideLayout=" + encodeURIComponent(JSON.stringify(overrideLayoutJson));
+                }
+
+                window.open(url);
+
+                printLayoutWindow.close();
+            });
+
+            //Cancel Button
+            $('.printLayoutCancel').click(function(){
+                printLayoutWindow.close();
+            });
+        });
+    },
+
 };

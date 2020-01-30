@@ -4,13 +4,14 @@
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-		<title>ODIN :: Application Program Interface</title>
+		<title>ODIN :: Application Builder</title>
 		<link rel="shortcut icon" href="../../favicon.ico">
         <!-- Bootstrap core CSS -->
         <link title="bootstrap" href="../bootstrap-3.3.5-dist/css/bootstrap.min.css" rel="stylesheet">
         <link rel="stylesheet" href="../font-awesome-4.5.0/css/font-awesome.min.css">
         <!-- Opturo CSS -->
 		<link rel="stylesheet" href="css/appBuilder.css">
+        <link rel="stylesheet" href="css/dropDownSubMenu.css">
         <link rel="stylesheet" href="../odinCharts/odinCharts.css">
         <!-- Kendo UI CSS -->
 		<!--<link rel="stylesheet" href="../js/kendoui/styles/kendo.common.min.css">
@@ -18,11 +19,13 @@
         <link rel="stylesheet" href="../js/kendoui/styles/kendo.common-bootstrap.min.css" />
         <link rel="stylesheet" href="../js/kendoui/styles/kendo.bootstrap.min.css">
         <link rel="stylesheet" href="../js/kendoui/styles/kendo.bootstrap.mobile.min.css">
-
+        <!-- Code Mirror CSS -->
+        <link rel="stylesheet" href="../js/codemirror-5.43.0/lib/codemirror.css">
+        <link rel="stylesheet" href="../js/codemirror-5.43.0/addon/hint/show-hint.css" />
 
     </head>
-    <body class="desktopBackground">
-    <nav id="mainNavbar" class="navbar navbar-default">
+    <body class="desktopBackground" style="height:100%">
+    <nav id="mainNavbar" class="hideNav navbar navbar-default" style="display:none;">
             <div class="container-fluid">
                 <div class="navbar-header navbar-left">
                     <a title="Change Report"  style="display:none;" id="changeReportsButton" class="tr btn navbar-btn btn-default" href="#"><i class="fa fa-bars"></i></a>
@@ -31,7 +34,21 @@
                 <p class="navbar-text breadcrumbNav"></p>
                 <a style="margin-left: 5px;" class="tr navbar-brand" href="#"><small class="savedReportName"></small></a>
                 <div class="navbar-header navbar-right">
+                    <div id="formBuilder_dashboardButtons" class="btn-group" style="display:none;">
+                        <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                            <span class="glyphicon glyphicon-blackboard" aria-hidden="true"></span>
+                            <span class="caret"></span>
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li ><a id="formBuilder_dashboardButton_edit" tabindex="-1" href="#"><i class="fa fa-pencil-square-o" aria-hidden="true"></i> Edit Dashboard</a></li>
+                            <li ><a id="formBuilder_dashboardButton_load" tabindex="-1" href="#"><i class="fa fa-folder-open-o" aria-hidden="true"></i> Load Dashboard</a></li>
+                            <li ><a id="formBuilder_dashboardButton_save" tabindex="-1" href="#"><i class="fa fa-floppy-o" aria-hidden="true"></i> Save Dashboard</a></li>
+                            <li ><a id="formBuilder_dashboardButton_print" tabindex="-1" href="#"><i class="fa fa-print" aria-hidden="true"></i> Print Layout</a></li>
+                        </ul>
+                    </div>
+
                 <span id="formBuilder_resultButtons" style="display:none;">
+                        <span class="resultDivider"> |</span>
                     <button title="Go Back"  id="formBuilder_backButton" class="tr btn btn-default navbar-btn">
                         <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span>
                     </button>
@@ -45,14 +62,14 @@
                     <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span>
                 </button>
                 <a title="My Account"  style="display:none;" id="accountButton" class="tr btn navbar-btn btn-default" href="#"><i class="fa fa-user"></i></a>
-                <button id="odinLogoutButton" title="Logout"  style="display:none;" type="submit" class="tr btn btn-default navbar-btn">
+                <button id="odinLogoutButton" title="Logout"  style="display:none;" class="tr btn btn-default navbar-btn">
                     <span class="glyphicon glyphicon-off" aria-hidden="true"></span>
                 </button>
             </div>
         </div>
     </nav>
 
-    <div id="smallLoadingMessage" class="tr label label-info" style="margin:20px;"><i class="fa fa-spinner fa-pulse fa-fw"></i> Loading...</div>
+    <div id="smallLoadingMessage" class="tr label label-info" style="display:none;margin:20px;"><i class="fa fa-spinner fa-pulse fa-fw"></i> Loading...</div>
 
     <!-- Displays the form -->
 	<div id="mainPanel" class="container-fluid" >
@@ -62,18 +79,18 @@
 	<div id="progressPanel" style="display:none;" class="container">
 		<h4 class="tr"><i class="fa fa-spinner fa-pulse fa-2x fa-fw"></i>Generating report...</h4>
 		<hr/>
-		<div class="progress progress-striped active">
+		<div class="progress progress-striped active hideNav">
 			<div class="progress-bar"  role="progressbar" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100" style="width: 100%">
 			</div>
 		</div>
         <div id="formBuilder_showLogContainer" style="display:none;height:200px;overflow-y:scroll;overflow-x: hidden;">
         </div>
-        <button id="formBuilder_terminateJobButton" style="float:right;margin:10px 0 10px 10px;" type="button" class="tr btn btn-danger"><i class="fa fa-ban"></i> Terminate Job</button>
-        <button id="formBuilder_showLogButton" style="float:right;margin:10px 0 10px 0;" type="button" class="tr btn btn-primary"><i class="fa fa-clipboard"></i> Show Log...</button>
+        <button id="formBuilder_terminateJobButton" style="float:right;margin:10px 0 10px 10px;" type="button" class="hideNav tr btn btn-danger"><i class="fa fa-ban"></i> Terminate Job</button>
+        <button id="formBuilder_showLogButton" style="float:right;margin:10px 0 10px 0;" type="button" class="hideNav tr btn btn-primary"><i class="fa fa-clipboard"></i> Show Log...</button>
     </div>
 
 	<!-- Displays the results -->
-	<div id="resultsPanel" style="display:none;" class="container-fluid">
+	<div id="resultsPanel" style="display:none;">
 	</div>
 
     <!-- Account Settings -->
@@ -92,7 +109,7 @@
         </div>
     </div>
 
-	<div class="poweredPanel container-fluid" >
+	<div class="poweredPanel container-fluid" style="display:none;">
 		<img style="margin-top:6px;" src="../images/powered_margin.png" alt="">
 	</div>
 
@@ -104,6 +121,8 @@
     <script src="../js/via.js"></script>
     <script src="../js/odin.js"></script>
     <script src="../odinCharts/odinCharts.js"></script>
+    <script src="../odinDashboard/odinDashboard.js"></script>
+    <script src="../odinDashboard/odinEditDashboard.js"></script>
     <script src="../js/odinKendoTable.js"></script>
     <script src="js/appBuilder.js"></script>
     <script src="../saysplatform/js/support.js"></script>
@@ -111,8 +130,16 @@
     <script src="../js/formdata.min.js"></script>
     <!-- Kendo UI -->
 	<script src="../js/kendoui/js/kendo.all.min.js"></script>
+    <!-- For Printing the Screen -->
+    <script src="../js/html2canvas.min.js"></script>
+    <!-- Code Mirror -->
+    <script src="../js/codemirror-5.43.0/lib/codemirror.js"></script>
+    <script src="../js/codemirror-5.43.0/mode/css/css.js"></script>
+    <script src="../js/codemirror-5.43.0/addon/selection/active-line.js"></script>
+    <script src="../js/codemirror-5.43.0/addon/hint/show-hint.js"></script>
+    <script src="../js/codemirror-5.43.0/addon/hint/css-hint.js"></script>
 
-	<script>
+    <script>
 		$(document).ready(function(){
 			odinFormBuilder.init();
 		});
